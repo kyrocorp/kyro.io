@@ -11,15 +11,25 @@
 
 <div id="gameWrapper">
 
-  <!-- HEADER -->
+  <!-- =========================
+       HEADER / SCOREBOARD
+  ========================= -->
+
   <header id="topBar">
+
     <div id="pointsPanel">
       <span class="pointsLabel">POINTS</span>
       <span id="playerPoints">0</span>
-      <div id="pointsNotification" class="points-notification" aria-live="polite"></div>
+
+      <div
+        id="pointsNotification"
+        class="points-notification"
+        aria-live="polite">
+      </div>
     </div>
 
     <div id="scoreboard">
+
       <div class="team blue">
         <span class="teamName">BLUE UNIT</span>
         <span id="blueScore">0</span>
@@ -34,232 +44,590 @@
         <span class="teamName">ORANGE CREW</span>
         <span id="orangeScore">0</span>
       </div>
+
     </div>
+
   </header>
 
-  <!-- CANVAS -->
-  <div id="arenaContainer">
-    <canvas id="gameCanvas" width="1200" height="700"></canvas>
 
-    <!-- GOAL MESSAGE -->
+  <!-- =========================
+       GAME ARENA
+  ========================= -->
+
+  <main id="arenaContainer">
+
+    <canvas
+      id="gameCanvas"
+      width="1200"
+      height="700">
+    </canvas>
+
+
+    <!-- =========================
+         GOAL MESSAGE
+    ========================= -->
+
     <div id="goalMessage" class="hidden">
-      <div id="goalText">GOAL!</div>
-      <div id="goalScorer"></div>
+
+      <div id="goalText">
+        GOAL!
+      </div>
+
+      <div id="goalScorer">
+      </div>
+
     </div>
 
-    <!-- COUNTDOWN -->
-    <div id="countdown" class="hidden">3</div>
 
-    <!-- PAUSE -->
-    <div id="pauseMenu" class="hidden">
-      <h1>PAUSED</h1>
-      <button id="resumeButton">RESUME MATCH</button>
+    <!-- =========================
+         MATCH COUNTDOWN
+    ========================= -->
+
+    <div
+      id="countdown"
+      class="hidden">
+      3
     </div>
 
-    <!-- END SCREEN -->
-    <div id="endScreen" class="hidden">
-      <h1 id="winnerText">BLUE UNIT WINS</h1>
-      <div id="finalScore"></div>
-      <button id="restartButton">PLAY AGAIN</button>
-    </div>
-  </div>
 
-  <!-- BOTTOM HUD -->
+    <!-- =========================
+         PAUSE MENU
+    ========================= -->
+
+    <div
+      id="pauseMenu"
+      class="hidden">
+
+      <div class="pause-panel">
+
+        <h1>PAUSED</h1>
+
+        <button id="resumeButton">
+          RESUME MATCH
+        </button>
+
+        <button id="pauseSettingsButton">
+          SETTINGS
+        </button>
+
+        <button id="concedeButton">
+          CONCEDE MATCH
+        </button>
+
+        <button id="pauseMainMenuButton">
+          MAIN MENU
+        </button>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         OLD END SCREEN
+    ========================= -->
+
+    <div
+      id="endScreen"
+      class="hidden">
+
+      <h1 id="winnerText">
+        BLUE UNIT WINS
+      </h1>
+
+      <div id="finalScore">
+        0 - 0
+      </div>
+
+      <button id="restartButton">
+        PLAY AGAIN
+      </button>
+
+    </div>
+
+  </main>
+
+
+  <!-- =========================
+       BOTTOM HUD
+  ========================= -->
+
   <div id="bottomHud">
 
+    <!-- BOOST -->
+
     <div id="boostContainer">
-      <div class="hudLabel">BOOST</div>
-      <div id="boostBar">
-        <div id="boostFill"></div>
+
+      <div class="hudLabel">
+        BOOST
       </div>
-      <span id="boostNumber">100</span>
+
+      <div id="boostBar">
+
+        <div id="boostFill"></div>
+
+      </div>
+
+      <span id="boostNumber">
+        100
+      </span>
+
     </div>
+
+
+    <!-- SPEED -->
 
     <div id="speedContainer">
-      <div class="hudLabel">SPEED</div>
-      <span id="speedNumber">0</span>
-      <span class="kmh">KM/H</span>
+
+      <div class="hudLabel">
+        SPEED
+      </div>
+
+      <span id="speedNumber">
+        0
+      </span>
+
+      <span class="kmh">
+        KM/H
+      </span>
+
     </div>
 
+
+    <!-- CONTROLS -->
+
     <div id="controls">
-      <span>PILOT CONTROLS</span>
-      <b>Z</b> Forward
-      <b>S</b> Reverse
-      <b>Q</b> Left
-      <b>D</b> Right
-      <b>SPACE</b> Boost
-      <b>P</b> Pause
+
+      <span>
+        PILOT CONTROLS
+      </span>
+
+      <b>Z</b>
+      Forward
+
+      <b>S</b>
+      Reverse
+
+      <b>Q</b>
+      Left
+
+      <b>D</b>
+      Right
+
+      <b>SPACE</b>
+      Boost
+
+      <b>P</b>
+      Pause
+
     </div>
 
   </div>
 
 </div>
+
 
 <!-- =========================
      MAIN MENU
 ========================= -->
 
-<div id="mainMenu" class="menu-screen">
+<div
+  id="mainMenu"
+  class="menu-screen">
 
-    <div class="menu-background"></div>
+  <div class="menu-background"></div>
 
-    <div class="menu-content">
+  <div class="menu-content">
 
-        <div class="logo">
-            <div class="logo-small">WELCOME TO</div>
-            <h1>TURBO<span>BALL</span></h1>
-            <div class="logo-io">.IO</div>
-        </div>
+    <div class="logo">
 
-        <div class="menu-buttons">
+      <div class="logo-small">
+        WELCOME TO
+      </div>
 
-            <button id="playButton" class="main-button">
-                PLAY GAME
-            </button>
+      <h1>
+        TURBO<span>BALL</span>
+      </h1>
 
-            <button id="howToPlayButton" class="secondary-button">
-                HOW TO PLAY
-            </button>
-
-            <button id="settingsButton" class="secondary-button">
-                SETTINGS
-            </button>
-
-        </div>
-
-        <div class="menu-footer">
-            ORIGINAL 2D CAR FOOTBALL GAME
-        </div>
+      <div class="logo-io">
+        .IO
+      </div>
 
     </div>
 
+
+    <div class="menu-buttons">
+
+      <button
+        id="playButton"
+        class="main-button">
+        PLAY GAME
+      </button>
+
+      <button
+        id="howToPlayButton"
+        class="secondary-button">
+        HOW TO PLAY
+      </button>
+
+      <button
+        id="settingsButton"
+        class="secondary-button">
+        SETTINGS
+      </button>
+
+    </div>
+
+
+    <div class="menu-footer">
+      ORIGINAL 2D CAR FOOTBALL GAME
+    </div>
+
+  </div>
+
 </div>
 
+
 <!-- =========================
-     HOW TO PLAY MENU
+     HOW TO PLAY
 ========================= -->
 
-<div id="howToPlayMenu" class="menu-screen hidden">
+<div
+  id="howToPlayMenu"
+  class="menu-screen hidden">
 
-    <div class="panel">
+  <div class="panel">
 
-        <h2>HOW TO PLAY</h2>
+    <h2>
+      HOW TO PLAY
+    </h2>
 
-        <div class="controls-grid">
 
-            <div>
-                <b>Z</b>
-                <span>ACCELERATE</span>
-            </div>
+    <div class="controls-grid">
 
-            <div>
-                <b>S</b>
-                <span>REVERSE</span>
-            </div>
+      <div>
+        <b id="howZKey">Z</b>
+        <span>ACCELERATE</span>
+      </div>
 
-            <div>
-                <b>Q</b>
-                <span>TURN LEFT</span>
-            </div>
+      <div>
+        <b id="howSKey">S</b>
+        <span>REVERSE</span>
+      </div>
 
-            <div>
-                <b>D</b>
-                <span>TURN RIGHT</span>
-            </div>
+      <div>
+        <b id="howQKey">Q</b>
+        <span>TURN LEFT</span>
+      </div>
 
-            <div>
-                <b>SPACE</b>
-                <span>BOOST</span>
-            </div>
+      <div>
+        <b id="howDKey">D</b>
+        <span>TURN RIGHT</span>
+      </div>
 
-        </div>
+      <div>
+        <b id="howSpaceKey">SPACE</b>
+        <span>BOOST</span>
+      </div>
 
-        <button id="backButton" class="secondary-button">
-            BACK
+      <div>
+        <b>P</b>
+        <span>PAUSE</span>
+      </div>
+
+    </div>
+
+
+    <button
+      id="backButton"
+      class="secondary-button">
+      BACK
+    </button>
+
+  </div>
+
+</div>
+
+
+<!-- =========================
+     SETTINGS MENU
+========================= -->
+
+<div
+  id="settingsMenu"
+  class="menu-screen hidden">
+
+  <div class="panel">
+
+    <h2>
+      SETTINGS
+    </h2>
+
+
+    <div class="settings-section">
+
+      <h3>
+        CONTROLS
+      </h3>
+
+
+      <div class="control-setting">
+
+        <span>
+          FORWARD
+        </span>
+
+        <button
+          id="forwardKeyButton"
+          class="key-button"
+          data-action="forward">
+          Z
         </button>
 
+      </div>
+
+
+      <div class="control-setting">
+
+        <span>
+          REVERSE
+        </span>
+
+        <button
+          id="reverseKeyButton"
+          class="key-button"
+          data-action="reverse">
+          S
+        </button>
+
+      </div>
+
+
+      <div class="control-setting">
+
+        <span>
+          TURN LEFT
+        </span>
+
+        <button
+          id="leftKeyButton"
+          class="key-button"
+          data-action="left">
+          Q
+        </button>
+
+      </div>
+
+
+      <div class="control-setting">
+
+        <span>
+          TURN RIGHT
+        </span>
+
+        <button
+          id="rightKeyButton"
+          class="key-button"
+          data-action="right">
+          D
+        </button>
+
+      </div>
+
+
+      <div class="control-setting">
+
+        <span>
+          BOOST
+        </span>
+
+        <button
+          id="boostKeyButton"
+          class="key-button"
+          data-action="boost">
+          SPACE
+        </button>
+
+      </div>
+
     </div>
 
+
+    <button
+      id="resetControlsButton"
+      class="secondary-button">
+      RESET CONTROLS
+    </button>
+
+
+    <button
+      id="settingsBackButton"
+      class="secondary-button">
+      BACK
+    </button>
+
+  </div>
+
 </div>
+
 
 <!-- =========================
-     MATCH START SCREEN
+     MATCH INTRO
 ========================= -->
 
-<div id="matchIntro" class="menu-screen hidden">
+<div
+  id="matchIntro"
+  class="menu-screen hidden">
 
-    <div class="match-intro-content">
+  <div class="match-intro-content">
 
-        <div class="versus">
+    <div class="versus">
 
-            <div class="intro-team blue-intro">
-                BLUE
-            </div>
+      <div class="intro-team blue-intro">
+        BLUE
+      </div>
 
-            <div class="vs">VS</div>
+      <div class="vs">
+        VS
+      </div>
 
-            <div class="intro-team orange-intro">
-                ORANGE
-            </div>
-
-        </div>
-
-        <div class="starting-text">
-            MATCH STARTING
-        </div>
+      <div class="intro-team orange-intro">
+        ORANGE
+      </div>
 
     </div>
 
+
+    <div class="starting-text">
+      MATCH STARTING
+    </div>
+
+  </div>
+
 </div>
+
 
 <!-- =========================
-     MATCH RESULT SCREEN
+     MATCH RESULT
 ========================= -->
 
-<div id="resultScreen" class="menu-screen hidden">
+<div
+  id="resultScreen"
+  class="menu-screen hidden">
 
-    <div class="result-panel">
+  <div class="result-panel">
 
-        <div class="result-title">
-            MATCH COMPLETE
-        </div>
+    <div class="result-title">
+      MATCH COMPLETE
+    </div>
 
-        <div id="winnerDisplay">
-            BLUE WINS
-        </div>
 
-        <div class="final-score-display">
+    <div id="winnerDisplay">
+      BLUE WINS
+    </div>
 
-            <div class="result-blue">
-                <span>BLUE</span>
-                <b id="finalBlueScore">0</b>
-            </div>
 
-            <div class="result-divider">-</div>
+    <div class="final-score-display">
 
-            <div class="result-orange">
-                <b id="finalOrangeScore">0</b>
-                <span>ORANGE</span>
-            </div>
+      <div class="result-blue">
 
-        </div>
+        <span>
+          BLUE
+        </span>
 
-        <div class="result-buttons">
+        <b id="finalBlueScore">
+          0
+        </b>
 
-            <button id="playAgainButton" class="main-button">
-                PLAY AGAIN
-            </button>
+      </div>
 
-            <button id="mainMenuButton" class="secondary-button">
-                MAIN MENU
-            </button>
 
-        </div>
+      <div class="result-divider">
+        -
+      </div>
+
+
+      <div class="result-orange">
+
+        <b id="finalOrangeScore">
+          0
+        </b>
+
+        <span>
+          ORANGE
+        </span>
+
+      </div>
 
     </div>
 
+
+    <div class="result-buttons">
+
+      <button
+        id="playAgainButton"
+        class="main-button">
+        PLAY AGAIN
+      </button>
+
+      <button
+        id="mainMenuButton"
+        class="secondary-button">
+        MAIN MENU
+      </button>
+
+    </div>
+
+  </div>
+
 </div>
+
+
+<!-- =========================
+     CONFIRM CONCEDE
+========================= -->
+
+<div
+  id="concedeConfirm"
+  class="menu-screen hidden">
+
+  <div class="panel">
+
+    <h2>
+      CONCEDE MATCH?
+    </h2>
+
+    <p>
+      Are you sure you want to concede?
+    </p>
+
+
+    <div class="confirm-buttons">
+
+      <button
+        id="confirmConcedeButton"
+        class="main-button">
+        YES, CONCEDE
+      </button>
+
+      <button
+        id="cancelConcedeButton"
+        class="secondary-button">
+        CANCEL
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- =========================
+     GAME SCRIPT
+========================= -->
 
 <script src="game.js"></script>
+
 </body>
 </html>
