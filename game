@@ -1,1 +1,1855 @@
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
+/* =========================
+   ELEMENTS
+========================= */
+
+const blueScoreEl = document.getElementById("blueScore");
+const orangeScoreEl = document.getElementById("orangeScore");
+const timerEl = document.getElementById("timer");
+
+const goalMessage = document.getElementById("goalMessage");
+const goalText = document.getElementById("goalText");
+const goalScorer = document.getElementById("goalScorer");
+
+const countdownEl = document.getElementById("countdown");
+const pauseMenu = document.getElementById("pauseMenu");
+const endScreen = document.getElementById("endScreen");
+const winnerText = document.getElementById("winnerText");
+const finalScore = document.getElementById("finalScore");
+
+const boostFill = document.getElementById("boostFill");
+const boostNumber = document.getElementById("boostNumber");
+const speedNumber = document.getElementById("speedNumber");
+const pointsPanel = document.getElementById("pointsPanel");
+const playerPointsEl = document.getElementById("playerPoints");
+const pointsNotification = document.getElementById("pointsNotification");
+
+const mainMenu = document.getElementById("mainMenu");
+const howToPlayMenu = document.getElementById("howToPlayMenu");
+const matchIntro = document.getElementById("matchIntro");
+const resultScreen = document.getElementById("resultScreen");
+const winnerDisplay = document.getElementById("winnerDisplay");
+const finalBlueScore = document.getElementById("finalBlueScore");
+const finalOrangeScore = document.getElementById("finalOrangeScore");
+
+const playButton = document.getElementById("playButton");
+const howToPlayButton = document.getElementById("howToPlayButton");
+const backButton = document.getElementById("backButton");
+const playAgainButton = document.getElementById("playAgainButton");
+const mainMenuButton = document.getElementById("mainMenuButton");
+
+/* =========================
+   ARENA
+========================= */
+
+const W = canvas.width;
+const H = canvas.height;
+
+const field = {
+  left: 90,
+  right: W - 90,
+  top: 45,
+  bottom: H - 45
+};
+
+const goal = {
+  openingTop: 230,
+  openingBottom: 470,
+  depth: 70
+};
+
+/*
+======================================
+INVISIBLE GOAL ZONES
+
+These zones are NOT drawn.
+
+When the ball enters these areas,
+a goal is detected.
+
+Blue goal = left
+Orange goal = right
+======================================
+*/
+
+const blueGoalZone = {
+  x: field.left - goal.depth,
+  y: goal.openingTop,
+  width: goal.depth,
+  height: goal.openingBottom - goal.openingTop
+};
+
+const orangeGoalZone = {
+  x: field.right,
+  y: goal.openingTop,
+  width: goal.depth,
+  height: goal.openingBottom - goal.openingTop
+};
+
+const saveZone = {
+  x: field.left + 10,
+  y: goal.openingTop + 20,
+  width: 125,
+  height: goal.openingBottom - goal.openingTop - 40
+};
+
+const BOOST_PICKUP_AMOUNT = 25;
+const BOOST_PICKUP_COOLDOWN = 5;
+
+const boostPads = [
+  { x: field.left + 85, y: field.top + 85, color: "#20cfff", cooldown: 0, pulse: 0, flash: 0 },
+  { x: field.right - 85, y: field.top + 85, color: "#ff8a18", cooldown: 0, pulse: 1.2, flash: 0 },
+  { x: field.left + 85, y: field.bottom - 85, color: "#20cfff", cooldown: 2.4, pulse: 2.4, flash: 0 },
+  { x: field.right - 85, y: field.bottom - 85, color: "#ff8a18", cooldown: 3.6, pulse: 3.6, flash: 0 },
+  { x: W / 2, y: field.top + 55, color: "#65e8ff", cooldown: 1.8, pulse: 4.8, flash: 0 },
+  { x: W / 2, y: field.bottom - 55, color: "#baff35", cooldown: 4.2, pulse: 6, flash: 0 }
+];
+
+const boostParticles = [];
+const goalParticles = [];
+
+/* =========================
+   GAME STATE
+========================= */
+
+let blueScore = 0;
+let orangeScore = 0;
+
+let gameTime = 120;
+let lastTime = performance.now();
+
+let paused = false;
+let gameRunning = false;
+let goalActive = false;
+let countdownInterval = null;
+let countdownTimeout = null;
+let matchIntroTimeout = null;
+let goalTimeout = null;
+let goalFlash = 0;
+let playerPoints = 0;
+let saveCooldown = 0;
+let saveAwardedForDanger = false;
+let pointsNotificationTimeout = null;
+
+const keys = {};
+
+function getControlKey(event) {
+  const key = event.key.toLowerCase();
+
+  if (["z", "q", "s", "d", "p"].includes(key)) {
+    return key;
+  }
+
+  if (event.code === "Space") {
+    return "space";
+  }
+
+  return null;
+}
+
+document.addEventListener("keydown", e => {
+  const controlKey = getControlKey(e);
+
+  if (e.code === "Space") {
+    e.preventDefault();
+  }
+
+  if (!gameRunning || goalActive) {
+    return;
+  }
+
+  if (controlKey === "p" && !goalActive) {
+    paused = !paused;
+    pauseMenu.classList.toggle("hidden", !paused);
+    return;
+  }
+
+  if (controlKey) {
+    keys[controlKey] = true;
+  }
+});
+
+document.addEventListener("keyup", e => {
+  const controlKey = getControlKey(e);
+
+  if (controlKey) {
+    keys[controlKey] = false;
+  }
+});
+
+window.addEventListener("blur", () => {
+  clearKeys();
+});
+
+function clearKeys() {
+  Object.keys(keys).forEach(key => {
+    keys[key] = false;
+  });
+}
+
+function updatePointsDisplay() {
+  playerPointsEl.textContent = playerPoints;
+}
+
+function showPointsNotification(text) {
+  clearTimeout(pointsNotificationTimeout);
+  pointsNotification.textContent = text;
+  pointsNotification.classList.remove("show");
+  void pointsNotification.offsetWidth;
+  pointsNotification.classList.add("show");
+
+  pointsNotificationTimeout = setTimeout(() => {
+    pointsNotification.classList.remove("show");
+    pointsNotificationTimeout = null;
+  }, 1200);
+}
+
+function awardPoints(amount, reason) {
+  playerPoints += amount;
+  updatePointsDisplay();
+  pointsPanel.classList.remove("earned");
+  void pointsPanel.offsetWidth;
+  pointsPanel.classList.add("earned");
+  showPointsNotification(`+${amount} ${reason}`);
+}
+
+function resetPointState() {
+  playerPoints = 0;
+  saveCooldown = 0;
+  saveAwardedForDanger = false;
+  updatePointsDisplay();
+  pointsPanel.classList.remove("earned");
+  clearTimeout(pointsNotificationTimeout);
+  pointsNotification.classList.remove("show");
+  pointsNotification.textContent = "";
+}
+
+/* =========================
+   CAR CLASS
+========================= */
+
+class Car {
+
+  constructor(x, y, color, isBot = false) {
+
+    this.x = x;
+    this.y = y;
+
+    this.startX = x;
+    this.startY = y;
+
+    this.color = color;
+    this.isBot = isBot;
+
+    this.angle = isBot ? Math.PI : 0;
+
+    this.speed = 0;
+
+    this.radius = 25;
+
+    this.acceleration = 0.18;
+    this.reverseAcceleration = 0.12;
+
+    this.maxSpeed = 7.2;
+    this.maxReverse = -3.2;
+
+    this.turnSpeed = 0.055;
+
+    this.boost = 100;
+
+    this.boosting = false;
+    this.ballContact = false;
+  }
+
+  reset() {
+
+    this.x = this.startX;
+    this.y = this.startY;
+
+    this.speed = 0;
+
+    this.angle = this.isBot ? Math.PI : 0;
+
+    this.boost = 100;
+    this.ballContact = false;
+  }
+
+  update() {
+
+    if (this.isBot) {
+      this.updateBot();
+    } else {
+      this.updatePlayer();
+    }
+
+    this.x += Math.cos(this.angle) * this.speed;
+    this.y += Math.sin(this.angle) * this.speed;
+
+    this.speed *= 0.985;
+
+    if (Math.abs(this.speed) < 0.02) {
+      this.speed = 0;
+    }
+
+    this.keepInsideField();
+
+    this.boost = Math.min(100, this.boost + 0.025);
+  }
+
+  updatePlayer() {
+
+    this.boosting = false;
+
+    // Z = forward
+    if (keys["z"]) {
+      this.speed += this.acceleration;
+    }
+
+    // S = reverse / brake
+    if (keys["s"]) {
+
+      if (this.speed > 0) {
+        this.speed -= 0.25;
+      } else {
+        this.speed -= this.reverseAcceleration;
+      }
+
+    }
+
+    // Q = left
+    if (keys["q"]) {
+
+      const direction = this.speed >= 0 ? 1 : -1;
+
+      this.angle -= this.turnSpeed *
+        Math.min(Math.abs(this.speed) / 2 + 0.3, 1) *
+        direction;
+    }
+
+    // D = right
+    if (keys["d"]) {
+
+      const direction = this.speed >= 0 ? 1 : -1;
+
+      this.angle += this.turnSpeed *
+        Math.min(Math.abs(this.speed) / 2 + 0.3, 1) *
+        direction;
+    }
+
+    // SPACE = boost
+    if (keys.space && this.boost > 0 && this.speed > 0) {
+
+      this.speed += 0.28;
+
+      this.boost -= 0.7;
+
+      this.boosting = true;
+    }
+
+    this.speed = Math.max(
+      this.maxReverse,
+      Math.min(this.speed, this.maxSpeed)
+    );
+  }
+
+  updateBot() {
+
+    const distanceToBall = Math.hypot(ball.x - this.x, ball.y - this.y);
+    const ballNearOwnGoal = ball.x > W * 0.56;
+    const ballNearBlueGoal = ball.x < W * 0.42;
+    const shouldDefend = !ballNearOwnGoal &&
+      !ballNearBlueGoal &&
+      distanceToBall > 250;
+
+    let targetX = ball.x;
+    let targetY = ball.y;
+
+    if (shouldDefend) {
+      targetX = field.right - 175;
+      targetY = H / 2 + (ball.y - H / 2) * 0.5;
+    }
+
+    const dx = targetX - this.x;
+    const dy = targetY - this.y;
+
+    const targetAngle = Math.atan2(dy, dx);
+
+    let angleDifference =
+      ((targetAngle - this.angle + Math.PI * 3) %
+        (Math.PI * 2)) - Math.PI;
+
+    if (angleDifference > 0.05) {
+      this.angle += this.turnSpeed * 0.95;
+    }
+
+    if (angleDifference < -0.05) {
+      this.angle -= this.turnSpeed * 0.95;
+    }
+
+    this.speed += ballNearOwnGoal || ballNearBlueGoal ? 0.17 : 0.14;
+
+    this.speed = Math.min(this.speed, 6.2);
+  }
+
+  keepInsideField() {
+
+    const r = this.radius;
+
+    if (this.x < field.left + r) {
+      this.x = field.left + r;
+      this.speed *= -0.3;
+    }
+
+    if (this.x > field.right - r) {
+      this.x = field.right - r;
+      this.speed *= -0.3;
+    }
+
+    if (this.y < field.top + r) {
+      this.y = field.top + r;
+      this.speed *= -0.3;
+    }
+
+    if (this.y > field.bottom - r) {
+      this.y = field.bottom - r;
+      this.speed *= -0.3;
+    }
+  }
+
+  draw() {
+
+    ctx.save();
+
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+
+    // Boost trail
+    if (this.boosting) {
+
+      ctx.fillStyle = "rgba(80,220,255,0.7)";
+
+      ctx.beginPath();
+
+      ctx.moveTo(-38, -12);
+      ctx.lineTo(-65 - Math.random() * 20, 0);
+      ctx.lineTo(-38, 12);
+
+      ctx.fill();
+    }
+
+    // Car shadow
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 20;
+
+    // Main body
+    ctx.fillStyle = this.color;
+
+    roundRect(ctx, -28, -17, 56, 34, 10);
+    ctx.fill();
+
+    // Dark roof
+    ctx.fillStyle = "#08101a";
+
+    roundRect(ctx, -5, -12, 24, 24, 7);
+    ctx.fill();
+
+    // Front light
+    ctx.fillStyle = "#ffffff";
+
+    ctx.fillRect(20, -9, 5, 7);
+    ctx.fillRect(20, 2, 5, 7);
+
+    // Wheels
+    ctx.fillStyle = "#05070b";
+
+    ctx.fillRect(-18, -22, 12, 7);
+    ctx.fillRect(8, -22, 12, 7);
+
+    ctx.fillRect(-18, 15, 12, 7);
+    ctx.fillRect(8, 15, 12, 7);
+
+    ctx.restore();
+  }
+
+}
+
+/* =========================
+   BALL CLASS
+========================= */
+
+class Ball {
+
+  constructor() {
+
+    this.radius = 18;
+
+    this.reset();
+  }
+
+  reset() {
+
+    this.x = W / 2;
+    this.y = H / 2;
+
+    this.vx = 0;
+    this.vy = 0;
+  }
+
+  update() {
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Strong damping
+    this.vx *= 0.992;
+    this.vy *= 0.992;
+
+    // Stop tiny movement
+    if (Math.abs(this.vx) < 0.01) this.vx = 0;
+    if (Math.abs(this.vy) < 0.01) this.vy = 0;
+
+    // MAX BALL SPEED
+    const speed = Math.hypot(this.vx, this.vy);
+
+    const maxBallSpeed = 9;
+
+    if (speed > maxBallSpeed) {
+
+      this.vx = this.vx / speed * maxBallSpeed;
+      this.vy = this.vy / speed * maxBallSpeed;
+    }
+
+    this.checkGoal();
+
+    if (!goalActive) {
+      this.wallCollision();
+    }
+  }
+
+  checkGoal() {
+
+    /*
+    INVISIBLE GOAL DETECTION
+    */
+
+    // Ball in blue goal = Orange scores
+    if (
+      this.x - this.radius <= field.left &&
+      this.y > goal.openingTop &&
+      this.y < goal.openingBottom
+    ) {
+
+      scoreGoal("orange");
+    }
+
+    // Ball in orange goal = Blue scores
+    if (
+      this.x + this.radius >= field.right &&
+      this.y > goal.openingTop &&
+      this.y < goal.openingBottom
+    ) {
+
+      scoreGoal("blue");
+    }
+  }
+
+  wallCollision() {
+
+    // TOP
+    if (this.y - this.radius < field.top) {
+
+      this.y = field.top + this.radius;
+      this.vy *= -0.8;
+    }
+
+    // BOTTOM
+    if (this.y + this.radius > field.bottom) {
+
+      this.y = field.bottom - this.radius;
+      this.vy *= -0.8;
+    }
+
+    const insideGoalOpening =
+      this.y > goal.openingTop &&
+      this.y < goal.openingBottom;
+
+    // LEFT WALL
+    if (
+      this.x - this.radius < field.left &&
+      !insideGoalOpening
+    ) {
+
+      this.x = field.left + this.radius;
+      this.vx *= -0.8;
+    }
+
+    // RIGHT WALL
+    if (
+      this.x + this.radius > field.right &&
+      !insideGoalOpening
+    ) {
+
+      this.x = field.right - this.radius;
+      this.vx *= -0.8;
+    }
+
+    // Back walls inside goal
+
+    if (
+      this.x < field.left - goal.depth + this.radius &&
+      insideGoalOpening
+    ) {
+
+      this.x = field.left - goal.depth + this.radius;
+      this.vx *= -0.7;
+    }
+
+    if (
+      this.x > field.right + goal.depth - this.radius &&
+      insideGoalOpening
+    ) {
+
+      this.x = field.right + goal.depth - this.radius;
+      this.vx *= -0.7;
+    }
+  }
+
+  draw() {
+
+    ctx.save();
+
+    // Shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+
+    ctx.beginPath();
+    ctx.ellipse(
+      this.x + 6,
+      this.y + 8,
+      this.radius,
+      this.radius * 0.45,
+      0,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    // Glow
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 20;
+
+    // Ball
+    const gradient = ctx.createRadialGradient(
+      this.x - 5,
+      this.y - 5,
+      2,
+      this.x,
+      this.y,
+      this.radius
+    );
+
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.5, "#dce7f0");
+    gradient.addColorStop(1, "#7d91a3");
+
+    ctx.fillStyle = gradient;
+
+    ctx.beginPath();
+    ctx.arc(
+      this.x,
+      this.y,
+      this.radius,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+}
+
+/* =========================
+   CREATE OBJECTS
+========================= */
+
+const player = new Car(
+  350,
+  H / 2,
+  "#20cfff"
+);
+
+const bot = new Car(
+  W - 350,
+  H / 2,
+  "#ff8a18",
+  true
+);
+
+const ball = new Ball();
+
+function isPlayerInSaveZone() {
+  return (
+    player.x >= saveZone.x &&
+    player.x <= saveZone.x + saveZone.width &&
+    player.y >= saveZone.y &&
+    player.y <= saveZone.y + saveZone.height
+  );
+}
+
+function isBallDangerousForBlueGoal() {
+  const insideGoalLane =
+    ball.y + ball.radius > goal.openingTop &&
+    ball.y - ball.radius < goal.openingBottom;
+  const closeToBlueGoal = ball.x < field.left + 240;
+  const movingTowardBlueGoal = ball.vx < -0.1;
+  const alreadyAtGoalLine = ball.x < field.left + 105;
+
+  return insideGoalLane &&
+    closeToBlueGoal &&
+    (movingTowardBlueGoal || alreadyAtGoalLine);
+}
+
+function updateSaveState(delta) {
+  saveCooldown = Math.max(0, saveCooldown - Math.min(delta / 1000, 0.1));
+
+  if (!isBallDangerousForBlueGoal()) {
+    saveAwardedForDanger = false;
+  }
+}
+
+function tryAwardSave(car) {
+  if (
+    car !== player ||
+    saveAwardedForDanger ||
+    saveCooldown > 0 ||
+    !isPlayerInSaveZone() ||
+    !isBallDangerousForBlueGoal()
+  ) {
+    return;
+  }
+
+  saveAwardedForDanger = true;
+  saveCooldown = 4;
+  ball.vx = Math.max(1.5, Math.abs(ball.vx) * 0.55);
+  ball.vy *= 0.65;
+  awardPoints(50, "SAVE");
+}
+
+/* =========================
+   COLLISIONS
+========================= */
+
+function carBallCollision(car) {
+
+  const dx = ball.x - car.x;
+  const dy = ball.y - car.y;
+
+  const distance = Math.hypot(dx, dy);
+
+  const minDistance =
+    car.radius + ball.radius;
+
+  if (distance < minDistance) {
+    const newContact = !car.ballContact;
+    car.ballContact = true;
+
+    if (car === player && newContact) {
+      awardPoints(2, "BALL TOUCH");
+    }
+
+    const safeDistance = distance || 0.001;
+    const nx = dx / safeDistance;
+    const ny = dy / safeDistance;
+
+    const overlap =
+      minDistance - distance;
+
+    ball.x += nx * overlap;
+    ball.y += ny * overlap;
+
+    /*
+    IMPORTANT:
+
+    Reduced force.
+
+    The ball should NOT fly across
+    the entire field after one touch.
+    */
+
+    const hitForce =
+      Math.min(
+        Math.abs(car.speed) * 1.15 + 1.2,
+        7
+      );
+
+    ball.vx += nx * hitForce;
+    ball.vy += ny * hitForce;
+
+    // Add part of car direction
+    ball.vx += Math.cos(car.angle) *
+      Math.abs(car.speed) * 0.25;
+
+    ball.vy += Math.sin(car.angle) *
+      Math.abs(car.speed) * 0.25;
+
+    car.speed *= 0.82;
+
+    if (car === player && newContact) {
+      tryAwardSave(car);
+    }
+  } else {
+    car.ballContact = false;
+  }
+}
+
+function carCarCollision(a, b) {
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  const distance = Math.hypot(dx, dy);
+
+  const minDistance =
+    a.radius + b.radius;
+
+  if (distance < minDistance) {
+
+    const nx = dx / distance;
+    const ny = dy / distance;
+
+    const overlap =
+      minDistance - distance;
+
+    a.x -= nx * overlap / 2;
+    a.y -= ny * overlap / 2;
+
+    b.x += nx * overlap / 2;
+    b.y += ny * overlap / 2;
+
+    const temp = a.speed;
+
+    a.speed = b.speed * 0.55;
+    b.speed = temp * 0.55;
+  }
+}
+
+/* =========================
+   BOOST PICKUPS
+========================= */
+
+function spawnBoostParticles(pad) {
+  for (let i = 0; i < 10; i++) {
+    const angle = (Math.PI * 2 * i) / 10;
+    const speed = 1.2 + Math.random() * 1.4;
+
+    boostParticles.push({
+      x: pad.x,
+      y: pad.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.55,
+      size: 2 + Math.random() * 2,
+      color: pad.color
+    });
+  }
+}
+
+function updateBoostPickups(delta) {
+  const seconds = Math.min(delta / 1000, 0.1);
+
+  boostPads.forEach(pad => {
+    pad.cooldown = Math.max(0, pad.cooldown - seconds);
+    pad.pulse += seconds * 2.4;
+    pad.flash = Math.max(0, pad.flash - seconds * 2.5);
+  });
+
+  if (!gameRunning || paused || goalActive) return;
+
+  boostPads.forEach(pad => {
+    const distance = Math.hypot(player.x - pad.x, player.y - pad.y);
+
+    if (pad.cooldown <= 0 && distance < player.radius + 22) {
+      player.boost = Math.min(100, player.boost + BOOST_PICKUP_AMOUNT);
+      pad.cooldown = BOOST_PICKUP_COOLDOWN;
+      pad.flash = 1;
+      spawnBoostParticles(pad);
+    }
+  });
+}
+
+function spawnGoalParticles(team) {
+  const color = team === "blue" ? "#43d9ff" : "#ff9d2e";
+
+  for (let i = 0; i < 28; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 3.5;
+
+    goalParticles.push({
+      x: W / 2,
+      y: H / 2,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.1,
+      size: 2 + Math.random() * 4,
+      color
+    });
+  }
+}
+
+function updateEffects(delta) {
+  const seconds = Math.min(delta / 1000, 0.1);
+
+  goalFlash = Math.max(0, goalFlash - seconds * 2.2);
+
+  [boostParticles, goalParticles].forEach(particles => {
+    particles.forEach(particle => {
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.vx *= 0.97;
+      particle.vy *= 0.97;
+      particle.life -= seconds;
+    });
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      if (particles[i].life <= 0) {
+        particles.splice(i, 1);
+      }
+    }
+  });
+}
+
+/* =========================
+   GOAL SYSTEM
+========================= */
+
+function scoreGoal(team) {
+
+  if (goalActive) return;
+
+  goalActive = true;
+  clearTimeout(goalTimeout);
+  clearKeys();
+  goalFlash = 1;
+  spawnGoalParticles(team);
+
+  if (team === "blue") {
+
+    blueScore++;
+
+    blueScoreEl.textContent = blueScore;
+    awardPoints(150, "GOAL");
+
+    goalText.style.color = "#43d9ff";
+    goalText.style.textShadow =
+      "0 0 25px #00aaff, 0 0 80px #0077ff";
+
+    goalScorer.textContent =
+      "BLUE UNIT SCORES";
+
+  } else {
+
+    orangeScore++;
+
+    orangeScoreEl.textContent = orangeScore;
+
+    goalText.style.color = "#ff9d2e";
+    goalText.style.textShadow =
+      "0 0 25px #ff6600, 0 0 80px #ff3300";
+
+    goalScorer.textContent =
+      "ORANGE CREW SCORES";
+  }
+
+  goalMessage.classList.remove("hidden");
+
+  goalTimeout = setTimeout(() => {
+
+    goalMessage.classList.add("hidden");
+
+    resetPositions();
+
+    startCountdown();
+    goalTimeout = null;
+
+  }, 1800);
+}
+
+function resetPositions() {
+
+  player.reset();
+  bot.reset();
+  ball.reset();
+}
+
+function startCountdown() {
+  clearInterval(countdownInterval);
+  clearTimeout(countdownTimeout);
+
+  let count = 3;
+
+  goalActive = true;
+  countdownEl.classList.remove("hidden");
+  countdownEl.textContent = count;
+
+  countdownInterval = setInterval(() => {
+
+    count--;
+
+    if (count > 0) {
+
+      countdownEl.textContent = count;
+
+    } else {
+
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+
+      countdownEl.textContent = "GO!";
+
+      countdownTimeout = setTimeout(() => {
+
+        countdownEl.classList.add("hidden");
+
+        goalActive = false;
+        countdownTimeout = null;
+
+      }, 700);
+    }
+
+  }, 1000);
+}
+
+/* =========================
+   TIMER
+========================= */
+
+function updateTimer(delta) {
+
+  if (!gameRunning || paused || goalActive) return;
+
+  gameTime -= delta / 1000;
+
+  if (gameTime <= 0) {
+
+    gameTime = 0;
+
+    endMatch();
+  }
+
+  const minutes =
+    Math.floor(gameTime / 60);
+
+  const seconds =
+    Math.floor(gameTime % 60);
+
+  timerEl.textContent =
+    `${minutes}:${seconds
+      .toString()
+      .padStart(2, "0")}`;
+}
+
+function endMatch() {
+
+  gameRunning = false;
+  paused = false;
+  goalActive = true;
+  clearKeys();
+  clearInterval(countdownInterval);
+  clearTimeout(countdownTimeout);
+  clearTimeout(matchIntroTimeout);
+  clearTimeout(goalTimeout);
+  pauseMenu.classList.add("hidden");
+  matchIntro.classList.add("hidden");
+  endScreen.classList.add("hidden");
+
+  if (blueScore > orangeScore) {
+
+    winnerText.textContent =
+      "BLUE UNIT WINS";
+
+    winnerText.style.color = "#43d9ff";
+
+  } else if (orangeScore > blueScore) {
+
+    winnerText.textContent =
+      "ORANGE CREW WINS";
+
+    winnerText.style.color = "#ff9d2e";
+
+  } else {
+
+    winnerText.textContent = "DRAW";
+    winnerText.style.color = "#ffffff";
+  }
+
+  finalScore.textContent =
+    `${blueScore} - ${orangeScore}`;
+
+  if (blueScore > orangeScore) {
+    winnerDisplay.textContent = "BLUE WINS";
+    winnerDisplay.style.color = "#43cfff";
+  } else if (orangeScore > blueScore) {
+    winnerDisplay.textContent = "ORANGE WINS";
+    winnerDisplay.style.color = "#ff8a20";
+  } else {
+    winnerDisplay.textContent = "DRAW";
+    winnerDisplay.style.color = "#ffffff";
+  }
+
+  finalBlueScore.textContent = blueScore;
+  finalOrangeScore.textContent = orangeScore;
+  resultScreen.classList.remove("hidden");
+}
+
+/* =========================
+   DRAW ARENA
+========================= */
+
+function drawArena() {
+
+  // Background
+  ctx.fillStyle = "#06131f";
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle =
+    "rgba(80, 180, 255, 0.08)";
+
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x < W; x += 60) {
+
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y < H; y += 60) {
+
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+
+  // Field glow
+  ctx.strokeStyle =
+    "rgba(120, 220, 255, 0.35)";
+
+  ctx.lineWidth = 3;
+
+  ctx.strokeRect(
+    field.left,
+    field.top,
+    field.right - field.left,
+    field.bottom - field.top
+  );
+
+  // Center line
+  ctx.beginPath();
+  ctx.moveTo(W / 2, field.top);
+  ctx.lineTo(W / 2, field.bottom);
+  ctx.stroke();
+
+  // Center circle
+  ctx.beginPath();
+
+  ctx.arc(
+    W / 2,
+    H / 2,
+    85,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.stroke();
+
+  // Center dot
+  ctx.fillStyle = "#72eaff";
+
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  /*
+  =========================
+  VISIBLE GOALS
+  =========================
+
+  The cages are visual.
+
+  The actual detection zones
+  are invisible and handled
+  in ball.checkGoal().
+  */
+
+  // BLUE GOAL
+  ctx.strokeStyle = "#18cfff";
+  ctx.shadowColor = "#00aaff";
+  ctx.shadowBlur = 20;
+  ctx.lineWidth = 5;
+
+  ctx.strokeRect(
+    field.left - goal.depth,
+    goal.openingTop,
+    goal.depth,
+    goal.openingBottom - goal.openingTop
+  );
+
+  // ORANGE GOAL
+  ctx.strokeStyle = "#ff851b";
+  ctx.shadowColor = "#ff5e00";
+
+  ctx.strokeRect(
+    field.right,
+    goal.openingTop,
+    goal.depth,
+    goal.openingBottom - goal.openingTop
+  );
+
+  ctx.shadowBlur = 0;
+
+  // Goal lines / posts
+
+  // Blue opening
+  ctx.strokeStyle = "#38dfff";
+
+  ctx.beginPath();
+  ctx.moveTo(field.left, goal.openingTop);
+  ctx.lineTo(field.left, goal.openingBottom);
+  ctx.stroke();
+
+  // Orange opening
+  ctx.strokeStyle = "#ff9b35";
+
+  ctx.beginPath();
+  ctx.moveTo(field.right, goal.openingTop);
+  ctx.lineTo(field.right, goal.openingBottom);
+  ctx.stroke();
+
+  drawBoostPads();
+}
+
+function drawBoostPads() {
+  boostPads.forEach(drawBoostPad);
+  drawParticles(boostParticles);
+}
+
+function drawBoostPad(pad) {
+  const available = pad.cooldown <= 0;
+  const pulse = 1 + Math.sin(pad.pulse) * 0.08;
+  const opacity = available ? 1 : 0.35;
+
+  ctx.save();
+  ctx.translate(pad.x, pad.y);
+  ctx.globalAlpha = opacity;
+  ctx.shadowColor = pad.color;
+  ctx.shadowBlur = available ? 22 : 8;
+
+  ctx.fillStyle = "rgba(8, 18, 30, 0.9)";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 28 * pulse, 16 * pulse, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = pad.color;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 19 * pulse, 8 * pulse, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 23 * pulse, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.globalAlpha = available ? 0.85 : 0.25;
+  ctx.strokeStyle = pad.color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(
+    0,
+    0,
+    31,
+    -Math.PI / 2,
+    -Math.PI / 2 + Math.PI * 2 * (available ? 1 : 1 - pad.cooldown / BOOST_PICKUP_COOLDOWN)
+  );
+  ctx.stroke();
+
+  if (pad.flash > 0) {
+    ctx.globalAlpha = pad.flash;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, 32 + (1 - pad.flash) * 18, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawParticles(particles) {
+  particles.forEach(particle => {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, particle.life));
+    ctx.fillStyle = particle.color;
+    ctx.shadowColor = particle.color;
+    ctx.shadowBlur = 12;
+
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  });
+}
+
+function drawGoalEffects() {
+  drawParticles(goalParticles);
+
+  if (goalFlash > 0) {
+    ctx.save();
+    ctx.globalAlpha = goalFlash * 0.12;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+}
+
+/* =========================
+   HUD
+========================= */
+
+function updateHUD() {
+
+  boostFill.style.width =
+    `${player.boost}%`;
+
+  boostNumber.textContent =
+    Math.floor(player.boost);
+
+  const displayedSpeed =
+    Math.round(Math.abs(player.speed) * 45);
+
+  speedNumber.textContent =
+    displayedSpeed;
+}
+
+/* =========================
+   ROUND RECT
+========================= */
+
+function roundRect(
+  ctx,
+  x,
+  y,
+  width,
+  height,
+  radius
+) {
+
+  ctx.beginPath();
+
+  ctx.moveTo(x + radius, y);
+
+  ctx.lineTo(
+    x + width - radius,
+    y
+  );
+
+  ctx.quadraticCurveTo(
+    x + width,
+    y,
+    x + width,
+    y + radius
+  );
+
+  ctx.lineTo(
+    x + width,
+    y + height - radius
+  );
+
+  ctx.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - radius,
+    y + height
+  );
+
+  ctx.lineTo(
+    x + radius,
+    y + height
+  );
+
+  ctx.quadraticCurveTo(
+    x,
+    y + height,
+    x,
+    y + height - radius
+  );
+
+  ctx.lineTo(
+    x,
+    y + radius
+  );
+
+  ctx.quadraticCurveTo(
+    x,
+    y,
+    x + radius,
+    y
+  );
+
+  ctx.closePath();
+}
+
+/* =========================
+   GAME LOOP
+========================= */
+
+function gameLoop(now) {
+
+  const delta = now - lastTime;
+
+  lastTime = now;
+  updateSaveState(delta);
+  updateBoostPickups(delta);
+  updateEffects(delta);
+
+  if (
+    gameRunning &&
+    !paused &&
+    !goalActive
+  ) {
+
+    player.update();
+    bot.update();
+
+    ball.update();
+
+    carBallCollision(player);
+    carBallCollision(bot);
+
+    carCarCollision(player, bot);
+
+    updateTimer(delta);
+  }
+
+  drawArena();
+
+  ball.draw();
+
+  player.draw();
+  bot.draw();
+
+  drawGoalEffects();
+  updateHUD();
+
+  requestAnimationFrame(gameLoop);
+}
+
+/* =========================
+   BUTTONS
+========================= */
+
+function startMatch() {
+  clearInterval(countdownInterval);
+  clearTimeout(countdownTimeout);
+  clearTimeout(matchIntroTimeout);
+  clearTimeout(goalTimeout);
+  clearKeys();
+  resetPointState();
+  boostParticles.length = 0;
+  goalParticles.length = 0;
+  goalFlash = 0;
+  boostPads.forEach(pad => {
+    pad.cooldown = 0;
+    pad.flash = 0;
+  });
+
+  blueScore = 0;
+  orangeScore = 0;
+  blueScoreEl.textContent = 0;
+  orangeScoreEl.textContent = 0;
+
+  gameTime = 120;
+  timerEl.textContent = "2:00";
+  paused = false;
+  gameRunning = true;
+  goalActive = true;
+
+  resetPositions();
+
+  mainMenu.classList.add("hidden");
+  howToPlayMenu.classList.add("hidden");
+  resultScreen.classList.add("hidden");
+  endScreen.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  matchIntro.classList.remove("hidden");
+
+  matchIntroTimeout = setTimeout(() => {
+    if (!gameRunning) return;
+
+    matchIntro.classList.add("hidden");
+    startCountdown();
+    matchIntroTimeout = null;
+  }, 900);
+}
+
+function showMainMenu() {
+  clearInterval(countdownInterval);
+  clearTimeout(countdownTimeout);
+  clearTimeout(matchIntroTimeout);
+  clearTimeout(goalTimeout);
+  clearKeys();
+  resetPointState();
+
+  gameRunning = false;
+  paused = false;
+  goalActive = false;
+
+  matchIntro.classList.add("hidden");
+  howToPlayMenu.classList.add("hidden");
+  resultScreen.classList.add("hidden");
+  endScreen.classList.add("hidden");
+  pauseMenu.classList.add("hidden");
+  countdownEl.classList.add("hidden");
+  mainMenu.classList.remove("hidden");
+}
+
+document.getElementById("resumeButton").addEventListener("click", () => {
+  if (!gameRunning) return;
+
+  paused = false;
+  pauseMenu.classList.add("hidden");
+});
+
+playButton.addEventListener("click", startMatch);
+playAgainButton.addEventListener("click", startMatch);
+
+howToPlayButton.addEventListener("click", () => {
+  mainMenu.classList.add("hidden");
+  howToPlayMenu.classList.remove("hidden");
+});
+
+backButton.addEventListener("click", () => {
+  howToPlayMenu.classList.add("hidden");
+  mainMenu.classList.remove("hidden");
+});
+
+mainMenuButton.addEventListener("click", showMainMenu);
+
+document.getElementById("restartButton").addEventListener("click", startMatch);// AI AMÉLIORÉE + BOOST + ZONE D'ARRÊT
+// À AJOUTER À TON game.js EXISTANT
+
+// ===============================
+// IA INTELLIGENTE
+// ===============================
+
+function updateAI(car, delta) {
+    if (paused || gameOver || !gameStarted) return;
+
+    const goalX = field.x + 25;
+    const goalY = canvas.height / 2;
+
+    const distanceToBall = Math.hypot(
+        ball.x - car.x,
+        ball.y - car.y
+    );
+
+    const ballMovingTowardGoal =
+        ball.vx < -40;
+
+    // -------------------------------
+    // 1. DÉFENSE
+    // -------------------------------
+
+    let targetX;
+    let targetY;
+
+    if (
+        ballMovingTowardGoal &&
+        ball.x < canvas.width * 0.65
+    ) {
+        // L'IA se place entre la balle et son but
+        targetX = Math.max(
+            field.x + 110,
+            ball.x + 80
+        );
+
+        targetY =
+            ball.y * 0.7 +
+            goalY * 0.3;
+    }
+
+    // -------------------------------
+    // 2. ATTAQUE
+    // -------------------------------
+
+    else {
+        // L'IA vise légèrement derrière la balle
+        // pour pouvoir la pousser vers le but bleu
+        targetX = ball.x - 35;
+        targetY = ball.y;
+
+        // Si elle est loin, elle va directement
+        // vers la balle
+        if (distanceToBall > 300) {
+            targetX = ball.x;
+            targetY = ball.y;
+        }
+    }
+
+    // -------------------------------
+    // 3. DIRECTION
+    // -------------------------------
+
+    const dx = targetX - car.x;
+    const dy = targetY - car.y;
+
+    const targetAngle = Math.atan2(dy, dx);
+
+    let angleDifference =
+        targetAngle - car.angle;
+
+    while (angleDifference > Math.PI) {
+        angleDifference -= Math.PI * 2;
+    }
+
+    while (angleDifference < -Math.PI) {
+        angleDifference += Math.PI * 2;
+    }
+
+    // Rotation intelligente
+    car.angle +=
+        Math.sign(angleDifference) *
+        Math.min(
+            Math.abs(angleDifference),
+            4.2 * delta
+        );
+
+    // -------------------------------
+    // 4. BOOST INTELLIGENT
+    // -------------------------------
+
+    const boostNeeded =
+        distanceToBall > 250 ||
+        (
+            ballMovingTowardGoal &&
+            car.x < ball.x
+        );
+
+    if (
+        boostNeeded &&
+        car.boost > 15 &&
+        Math.abs(angleDifference) < 0.35
+    ) {
+        car.boosting = true;
+        car.boost -= 28 * delta;
+    } else {
+        car.boosting = false;
+    }
+
+    // -------------------------------
+    // 5. VA CHERCHER LES BOOSTS
+    // -------------------------------
+
+    if (
+        car.boost < 25 &&
+        distanceToBall > 180
+    ) {
+        let nearestPad = null;
+        let nearestDistance = Infinity;
+
+        extraBoostPads.forEach(pad => {
+            if (!pad.active) return;
+
+            const d = Math.hypot(
+                pad.x - car.x,
+                pad.y - car.y
+            );
+
+            if (d < nearestDistance) {
+                nearestDistance = d;
+                nearestPad = pad;
+            }
+        });
+
+        if (nearestPad) {
+            const boostDX =
+                nearestPad.x - car.x;
+
+            const boostDY =
+                nearestPad.y - car.y;
+
+            const boostAngle =
+                Math.atan2(boostDY, boostDX);
+
+            let boostDifference =
+                boostAngle - car.angle;
+
+            while (boostDifference > Math.PI) {
+                boostDifference -= Math.PI * 2;
+            }
+
+            while (boostDifference < -Math.PI) {
+                boostDifference += Math.PI * 2;
+            }
+
+            car.angle +=
+                Math.sign(boostDifference) *
+                Math.min(
+                    Math.abs(boostDifference),
+                    4.2 * delta
+                );
+
+            if (
+                Math.abs(boostDifference) < 0.35
+            ) {
+                car.boosting = true;
+            }
+
+            targetX = nearestPad.x;
+            targetY = nearestPad.y;
+        }
+    }
+
+    // -------------------------------
+    // 6. AVANCE
+    // -------------------------------
+
+    const currentSpeed =
+        car.boosting ? 360 : 230;
+
+    car.vx =
+        Math.cos(car.angle) *
+        currentSpeed;
+
+    car.vy =
+        Math.sin(car.angle) *
+        currentSpeed;
+
+    car.x += car.vx * delta;
+    car.y += car.vy * delta;
+
+    // Limites du terrain
+    car.x = Math.max(
+        field.x + car.r,
+        Math.min(
+            field.x + field.w - car.r,
+            car.x
+        )
+    );
+
+    car.y = Math.max(
+        field.y + car.r,
+        Math.min(
+            field.y + field.h - car.r,
+            car.y
+        )
+    );
+}
+
+
+// ===============================
+// ZONE D'ARRÊT AGRANDIE
+// DEVANT LE BUT, PAS DANS LE BUT
+// ===============================
+
+function checkSaveZone(car, team) {
+
+    const goalCenterY =
+        canvas.height / 2;
+
+    let zoneX;
+
+    if (team === "blue") {
+
+        // Zone devant le but bleu
+        zoneX = field.x + 125;
+
+    } else {
+
+        // Zone devant le but orange
+        zoneX =
+            field.x +
+            field.w -
+            125;
+    }
+
+    const zoneWidth = 150;
+    const zoneHeight = 220;
+
+    const insideZone =
+        car.x >
+        zoneX - zoneWidth / 2 &&
+        car.x <
+        zoneX + zoneWidth / 2 &&
+        car.y >
+        goalCenterY - zoneHeight / 2 &&
+        car.y <
+        goalCenterY + zoneHeight / 2;
+
+    // La zone est volontairement devant le but
+    // et ne rentre pas dans la cage.
+
+    if (
+        insideZone &&
+        Math.hypot(ball.vx, ball.vy) > 100
+    ) {
+
+        const ballDistance =
+            Math.hypot(
+                ball.x - car.x,
+                ball.y - car.y
+            );
+
+        // La voiture doit réellement être proche
+        // de la trajectoire de la balle.
+        if (ballDistance < 85) {
+
+            if (!car.saveCooldown) {
+
+                car.saveCooldown = true;
+
+                if (team === "blue") {
+                    bluePoints += 50;
+                    showPoints(
+                        "+50 SAVE",
+                        "#168cff"
+                    );
+                } else {
+                    orangePoints += 50;
+                    showPoints(
+                        "+50 SAVE",
+                        "#ff6b18"
+                    );
+                }
+
+                // Repousse la balle
+                const dx =
+                    ball.x - car.x;
+
+                const dy =
+                    ball.y - car.y;
+
+                const length =
+                    Math.hypot(dx, dy) || 1;
+
+                ball.vx =
+                    (dx / length) * 420;
+
+                ball.vy =
+                    (dy / length) * 420;
+
+                setTimeout(() => {
+                    car.saveCooldown = false;
+                }, 1200);
+            }
+        }
+    }
+}
