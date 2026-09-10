@@ -1,47 +1,503 @@
-/* =========================================================
-   ROCKET LEAGUE.IO
-   Jeu 2D voiture + football
-   PC + MOBILE
-========================================================= */
-
 const canvas = document.getElementById("gameCanvas");
-
-if (!canvas) {
-  throw new Error("gameCanvas introuvable");
-}
+if (!canvas) throw new Error("gameCanvas introuvable");
 
 const ctx = canvas.getContext("2d");
-
 const W = canvas.width;
 const H = canvas.height;
 
 const $ = id => document.getElementById(id);
 
-/* =========================================================
-   NOM DU JEU
-========================================================= */
+// =========================
+// ROCKET LEAGUE.IO + MOBILE
+// =========================
+document.title = "Rocket League.io";
 
-document.title = "ROCKET LEAGUE.IO";
+function renameGameBrand() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
 
-function updateGameName() {
-  document.title = "ROCKET LEAGUE.IO";
-
-  document.querySelectorAll("*").forEach(el => {
-    if (
-      el.children.length === 0 &&
-      typeof el.textContent === "string"
-    ) {
-      el.textContent =
-        el.textContent
-          .replaceAll("TURBOBALL.IO", "ROCKET LEAGUE.IO")
-          .replaceAll("TURBOBALL", "ROCKET LEAGUE");
+  for (const node of nodes) {
+    if (/TURBOBALL\.IO/i.test(node.nodeValue)) {
+      node.nodeValue = node.nodeValue.replace(/TURBOBALL\.IO/gi, "ROCKET LEAGUE.IO");
     }
-  });
+  }
 }
 
-/* =========================================================
-   ELEMENTS HTML
-========================================================= */
+const mobileInput = {
+  active: false,
+  id: null,
+  startX: 0,
+  startY: 0,
+  x: 0,
+  y: 0,
+  forward: false,
+  reverse: false,
+  left: false,
+  right: false,
+  boost: false
+};
+
+let deviceMode = null;
+let mobileBoostSide = "left";
+let mobilePad = null;
+let mobileBoostButton = null;
+let mobilePauseButton = null;
+
+try {
+  mobileBoostSide =
+    localStorage.getItem("rocketleague-mobile-boost-side") || "left";
+} catch {}
+
+function setDeviceMode(mode) {
+  deviceMode = mode;
+
+  try {
+    localStorage.setItem("rocketleague-device-mode", mode);
+  } catch {}
+
+  if (mode === "mobile") {
+    createMobileControls();
+  } else {
+    removeMobileControls();
+  }
+
+  updateMobileSettingsUI();
+}
+
+function createDeviceChoice() {
+  if (document.getElementById("deviceChoiceOverlay")) return;
+
+  const overlay = document.createElement("div");
+
+  overlay.id = "deviceChoiceOverlay";
+
+  overlay.style.cssText = `
+    position:fixed;
+    inset:0;
+    z-index:99999;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(3,8,15,.96);
+    font-family:Arial,sans-serif;
+    color:#fff;
+    text-align:center;
+  `;
+
+  overlay.innerHTML = `
+    <div style="
+      width:min(560px,90vw);
+      padding:34px 22px;
+      border:1px solid rgba(100,220,255,.45);
+      border-radius:24px;
+      background:rgba(8,18,30,.96);
+      box-shadow:0 0 50px rgba(0,190,255,.18)
+    ">
+      <div style="
+        font-size:42px;
+        font-weight:900;
+        letter-spacing:3px;
+        margin-bottom:8px
+      ">
+        ROCKET LEAGUE.IO
+      </div>
+
+      <div style="
+        opacity:.75;
+        font-size:16px;
+        margin-bottom:28px
+      ">
+        CHOISIS TON APPAREIL
+      </div>
+
+      <div style="
+        display:flex;
+        gap:14px;
+        justify-content:center;
+        flex-wrap:wrap
+      ">
+        <button id="devicePC" style="
+          min-width:180px;
+          padding:18px 24px;
+          border:1px solid #43d9ff;
+          border-radius:14px;
+          background:#0b2130;
+          color:#fff;
+          font-weight:900;
+          font-size:18px;
+          cursor:pointer
+        ">
+          🖥️ PC
+        </button>
+
+        <button id="deviceMobile" style="
+          min-width:180px;
+          padding:18px 24px;
+          border:1px solid #ff9d2e;
+          border-radius:14px;
+          background:#301d0b;
+          color:#fff;
+          font-weight:900;
+          font-size:18px;
+          cursor:pointer
+        ">
+          📱 MOBILE
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#devicePC").onclick = () => {
+    setDeviceMode("pc");
+    overlay.remove();
+  };
+
+  overlay.querySelector("#deviceMobile").onclick = () => {
+    setDeviceMode("mobile");
+    overlay.remove();
+  };
+}
+
+function removeMobileControls() {
+  mobilePad?.remove();
+  mobileBoostButton?.remove();
+  mobilePauseButton?.remove();
+
+  mobilePad = null;
+  mobileBoostButton = null;
+  mobilePauseButton = null;
+
+  clearMobileInput();
+}
+
+function clearMobileInput() {
+  mobileInput.forward = false;
+  mobileInput.reverse = false;
+  mobileInput.left = false;
+  mobileInput.right = false;
+  mobileInput.boost = false;
+  mobileInput.active = false;
+  mobileInput.id = null;
+}
+
+function applyMobileVector(dx, dy) {
+  const dead = 12;
+  const max = 95;
+
+  const x = Math.max(-1, Math.min(1, dx / max));
+  const y = Math.max(-1, Math.min(1, dy / max));
+
+  mobileInput.left = x < -0.18;
+  mobileInput.right = x > 0.18;
+
+  mobileInput.forward = y < -0.18;
+  mobileInput.reverse = y > 0.18;
+
+  if (Math.abs(dx) < dead) {
+    mobileInput.left = false;
+    mobileInput.right = false;
+  }
+
+  if (Math.abs(dy) < dead) {
+    mobileInput.forward = false;
+    mobileInput.reverse = false;
+  }
+}
+
+function updateMobilePadInteractivity() {
+  if (!mobilePad) return;
+
+  mobilePad.style.pointerEvents =
+    deviceMode === "mobile" &&
+    gameRunning &&
+    !paused &&
+    !goalActive
+      ? "auto"
+      : "none";
+}
+
+function createMobileControls() {
+  removeMobileControls();
+
+  const oldStyle = document.getElementById("rocketMobileStyles");
+  oldStyle?.remove();
+
+  const style = document.createElement("style");
+
+  style.id = "rocketMobileStyles";
+
+  style.textContent = `
+    #rocketMobilePad {
+      position:fixed;
+      inset:0;
+      z-index:9000;
+      background:transparent;
+      touch-action:none;
+    }
+
+    #rocketMobileBoost,
+    #rocketMobilePause {
+      position:fixed;
+      z-index:9002;
+      border:2px solid rgba(255,255,255,.55);
+      color:#fff;
+      font-weight:900;
+      user-select:none;
+      -webkit-user-select:none;
+      touch-action:none;
+      box-shadow:0 0 22px rgba(255,255,255,.18);
+    }
+
+    #rocketMobileBoost {
+      width:92px;
+      height:92px;
+      border-radius:50%;
+      background:rgba(20,30,42,.68);
+      font-size:15px;
+    }
+
+    #rocketMobilePause {
+      right:18px;
+      top:18px;
+      width:58px;
+      height:58px;
+      border-radius:16px;
+      background:rgba(8,18,30,.72);
+      font-size:20px;
+    }
+
+    #rocketMobileBoost.left {
+      left:18px;
+      bottom:22px;
+    }
+
+    #rocketMobileBoost.right {
+      right:18px;
+      bottom:22px;
+    }
+
+    #rocketMobileSettings {
+      margin-top:18px;
+      padding:16px;
+      border:1px solid rgba(100,220,255,.3);
+      border-radius:14px;
+      background:rgba(7,16,27,.8);
+    }
+
+    #rocketMobileSettings button {
+      padding:10px 15px;
+      margin:5px;
+      border-radius:10px;
+      border:1px solid #43d9ff;
+      background:#102536;
+      color:#fff;
+      font-weight:800;
+    }
+  `;
+
+  document.head.appendChild(style);
+
+  mobilePad = document.createElement("div");
+  mobilePad.id = "rocketMobilePad";
+
+  document.body.appendChild(mobilePad);
+
+  mobileBoostButton = document.createElement("button");
+
+  mobileBoostButton.id = "rocketMobileBoost";
+  mobileBoostButton.className = mobileBoostSide;
+  mobileBoostButton.textContent = "BOOST";
+
+  document.body.appendChild(mobileBoostButton);
+
+  mobilePauseButton = document.createElement("button");
+
+  mobilePauseButton.id = "rocketMobilePause";
+  mobilePauseButton.textContent = "Ⅱ";
+
+  document.body.appendChild(mobilePauseButton);
+
+  mobileBoostButton.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    mobileInput.boost = true;
+
+    mobileBoostButton.setPointerCapture?.(e.pointerId);
+  });
+
+  ["pointerup", "pointercancel", "pointerleave"].forEach(type => {
+    mobileBoostButton.addEventListener(type, e => {
+      e.preventDefault();
+      mobileInput.boost = false;
+    });
+  });
+
+  mobilePauseButton.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (gameRunning && !goalActive) {
+      togglePause();
+    }
+  });
+
+  mobilePad.addEventListener(
+    "pointerdown",
+    e => {
+      if (e.target !== mobilePad) return;
+
+      e.preventDefault();
+
+      mobileInput.active = true;
+      mobileInput.id = e.pointerId;
+
+      mobileInput.startX = e.clientX;
+      mobileInput.startY = e.clientY;
+
+      mobilePad.setPointerCapture?.(e.pointerId);
+
+      applyMobileVector(0, 0);
+    },
+    { passive: false }
+  );
+
+  mobilePad.addEventListener(
+    "pointermove",
+    e => {
+      if (!mobileInput.active) return;
+      if (e.pointerId !== mobileInput.id) return;
+
+      e.preventDefault();
+
+      applyMobileVector(
+        e.clientX - mobileInput.startX,
+        e.clientY - mobileInput.startY
+      );
+    },
+    { passive: false }
+  );
+
+  ["pointerup", "pointercancel", "pointerleave"].forEach(type => {
+    mobilePad.addEventListener(
+      type,
+      e => {
+        if (
+          e.pointerId !== mobileInput.id &&
+          type !== "pointerleave"
+        ) {
+          return;
+        }
+
+        e.preventDefault();
+        clearMobileInput();
+      },
+      { passive: false }
+    );
+  });
+
+  updateMobilePadInteractivity();
+}
+
+function updateMobileSettingsUI() {
+  const old = document.getElementById("rocketMobileSettings");
+
+  old?.remove();
+
+  for (const action of Object.keys(keyButtons)) {
+    if (keyButtons[action]) {
+      keyButtons[action].style.display =
+        deviceMode === "mobile" ? "none" : "";
+    }
+  }
+
+  if ($("resetControlsButton")) {
+    $("resetControlsButton").style.display =
+      deviceMode === "mobile" ? "none" : "";
+  }
+
+  if (deviceMode !== "mobile" || !settingsMenu) return;
+
+  const box = document.createElement("div");
+
+  box.id = "rocketMobileSettings";
+
+  box.innerHTML = `
+    <div style="
+      font-weight:900;
+      font-size:18px;
+      margin-bottom:8px
+    ">
+      📱 MOBILE
+    </div>
+
+    <div style="
+      opacity:.8;
+      margin-bottom:8px
+    ">
+      Pavé tactile invisible : glisse ton doigt pour diriger.
+    </div>
+
+    <div style="
+      font-weight:800;
+      margin:10px 0 6px
+    ">
+      Position du bouton BOOST
+    </div>
+
+    <button id="mobileBoostLeft">
+      GAUCHE
+    </button>
+
+    <button id="mobileBoostRight">
+      DROITE
+    </button>
+
+    <button id="mobileBoostReset">
+      RÉINITIALISER
+    </button>
+  `;
+
+  settingsMenu.appendChild(box);
+
+  box.querySelector("#mobileBoostLeft").onclick = () => {
+    setMobileBoostSide("left");
+  };
+
+  box.querySelector("#mobileBoostRight").onclick = () => {
+    setMobileBoostSide("right");
+  };
+
+  box.querySelector("#mobileBoostReset").onclick = () => {
+    setMobileBoostSide("left");
+  };
+}
+
+function setMobileBoostSide(side) {
+  mobileBoostSide = side === "right" ? "right" : "left";
+
+  try {
+    localStorage.setItem(
+      "rocketleague-mobile-boost-side",
+      mobileBoostSide
+    );
+  } catch {}
+
+  if (mobileBoostButton) {
+    mobileBoostButton.className = mobileBoostSide;
+  }
+}
+
+function setupDeviceChoice() {
+  createDeviceChoice();
+}
+
+// =========================
+// DOM
+// =========================
 
 const blueScoreEl = $("blueScore");
 const orangeScoreEl = $("orangeScore");
@@ -53,8 +509,8 @@ const goalScorer = $("goalScorer");
 const countdownEl = $("countdown");
 
 const pauseMenu = $("pauseMenu");
-const resultScreen = $("resultScreen");
 
+const resultScreen = $("resultScreen");
 const winnerDisplay = $("winnerDisplay");
 const finalBlueScore = $("finalBlueScore");
 const finalOrangeScore = $("finalOrangeScore");
@@ -77,140 +533,60 @@ const speedNumber = $("speedNumber");
 const settingsMenu = $("settingsMenu");
 const concedeConfirm = $("concedeConfirm");
 
-/* =========================================================
-   COMPTEUR VITESSE BALLE
-========================================================= */
+// =========================
+// BALL SPEED HUD
+// =========================
 
-let ballSpeedPanel = null;
-let ballSpeedNumber = null;
+let ballSpeedEl = document.getElementById("ballSpeedNumber");
 
-function createBallSpeedHUD() {
-  if (document.getElementById("ballSpeedHUD")) {
-    ballSpeedPanel =
-      document.getElementById("ballSpeedHUD");
+if (!ballSpeedEl) {
+  const hud = document.createElement("div");
 
-    ballSpeedNumber =
-      document.getElementById("ballSpeedNumber");
+  hud.id = "ballSpeedHud";
 
-    return;
-  }
-
-  const style = document.createElement("style");
-
-  style.id = "rocket-ball-speed-style";
-
-  style.textContent = `
-    #ballSpeedHUD {
-      position: fixed;
-      top: 18px;
-      right: 20px;
-      z-index: 3000;
-
-      min-width: 145px;
-
-      padding: 10px 16px;
-
-      border-radius: 12px;
-
-      background:
-        linear-gradient(
-          135deg,
-          rgba(5,15,25,.92),
-          rgba(12,30,45,.88)
-        );
-
-      border: 1px solid rgba(130,220,255,.5);
-
-      box-shadow:
-        0 0 18px rgba(30,190,255,.15),
-        inset 0 0 12px rgba(30,190,255,.04);
-
-      color: white;
-
-      font-family: Arial,sans-serif;
-
-      text-align: center;
-
-      pointer-events: none;
-    }
-
-    #ballSpeedTitle {
-      font-size: 10px;
-      letter-spacing: 2px;
-      color: #9fc5d8;
-      font-weight: 800;
-    }
-
-    #ballSpeedNumber {
-      margin-top: 2px;
-
-      font-size: 24px;
-      font-weight: 900;
-
-      letter-spacing: 1px;
-
-      text-shadow:
-        0 0 12px rgba(100,220,255,.55);
-    }
-
-    #ballSpeedHUD.pinch {
-      transform: scale(1.08);
-
-      border-color: rgba(255,255,255,.9);
-
-      box-shadow:
-        0 0 28px rgba(255,255,255,.35);
-    }
-
-    @media(max-width:700px) {
-      #ballSpeedHUD {
-        top: 12px;
-        right: 12px;
-        min-width: 115px;
-        padding: 7px 10px;
-      }
-
-      #ballSpeedNumber {
-        font-size: 19px;
-      }
-
-      #ballSpeedTitle {
-        font-size: 8px;
-      }
-    }
-  `;
-
-  document.head.appendChild(style);
-
-  ballSpeedPanel =
-    document.createElement("div");
-
-  ballSpeedPanel.id =
-    "ballSpeedHUD";
-
-  ballSpeedPanel.innerHTML = `
-    <div id="ballSpeedTitle">
+  hud.innerHTML = `
+    <div style="
+      font-size:11px;
+      letter-spacing:2px;
+      opacity:.7
+    ">
       BALL SPEED
     </div>
 
     <div id="ballSpeedNumber">
-      0 KM/H
+      0
+    </div>
+
+    <div style="
+      font-size:11px;
+      opacity:.65
+    ">
+      KM/H
     </div>
   `;
 
-  document.body.appendChild(
-    ballSpeedPanel
-  );
+  hud.style.cssText = `
+    position:fixed;
+    right:18px;
+    top:18px;
+    z-index:8000;
+    text-align:right;
+    color:#fff;
+    font-family:Arial,sans-serif;
+    font-weight:900;
+    text-shadow:0 0 12px rgba(100,220,255,.7);
+    pointer-events:none;
+  `;
 
-  ballSpeedNumber =
-    document.getElementById(
-      "ballSpeedNumber"
-    );
+  document.body.appendChild(hud);
+
+  ballSpeedEl =
+    document.getElementById("ballSpeedNumber");
 }
 
-/* =========================================================
-   CONTROLES PC
-========================================================= */
+// =========================
+// CONTROLS PC
+// =========================
 
 const defaults = {
   forward: "z",
@@ -220,24 +596,17 @@ const defaults = {
   boost: "space"
 };
 
-let controls = {
-  ...defaults
-};
+let controls = { ...defaults };
 
 try {
-  const saved =
-    JSON.parse(
-      localStorage.getItem(
-        "rocket-league-io-controls"
-      ) || "null"
-    );
+  const saved = JSON.parse(
+    localStorage.getItem("turboball-controls") || "null"
+  );
 
   if (
     saved &&
     Object.keys(defaults).every(
-      k =>
-        typeof saved[k] ===
-        "string"
+      k => typeof saved[k] === "string"
     )
   ) {
     controls = {
@@ -263,1157 +632,226 @@ const howButtons = {
   boost: $("howSpaceKey")
 };
 
-const keys =
-  Object.create(null);
-
 let waitingForAction = null;
-
 let settingsReturn = "main";
 
-/* =========================================================
-   MODE PC / MOBILE
-========================================================= */
+const keys = Object.create(null);
 
-let deviceMode = null;
+function keyName(key) {
+  if (key === " ") return "SPACE";
+  if (key === "space") return "SPACE";
+  if (key.length === 1) return key.toUpperCase();
 
-const mobileInput = {
-  forward: false,
-  reverse: false,
-  left: false,
-  right: false,
-  boost: false
-};
-
-let mobileJoystick = null;
-let mobileJoystickPointer = null;
-
-/* =========================================================
-   CHOIX APPAREIL
-========================================================= */
-
-function createDeviceChoice() {
-  if (
-    document.getElementById(
-      "deviceChoice"
-    )
-  ) {
-    return;
-  }
-
-  mainMenu?.classList.add(
-    "hidden"
-  );
-
-  const style =
-    document.createElement(
-      "style"
-    );
-
-  style.id =
-    "device-choice-style";
-
-  style.textContent = `
-    #deviceChoice {
-      position: fixed;
-      inset: 0;
-      z-index: 99999;
-
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      padding: 20px;
-
-      box-sizing: border-box;
-
-      background:
-        radial-gradient(
-          circle at center,
-          rgba(10,35,60,.98),
-          rgba(2,7,14,1)
-        );
-
-      color: white;
-
-      font-family: Arial,sans-serif;
-    }
-
-    .device-box {
-      width: min(700px,94vw);
-
-      padding: 35px 25px;
-
-      border-radius: 24px;
-
-      background:
-        rgba(4,15,27,.97);
-
-      border:
-        1px solid rgba(80,210,255,.5);
-
-      box-shadow:
-        0 0 45px rgba(0,180,255,.18);
-
-      text-align: center;
-    }
-
-    .device-title {
-      font-size:
-        clamp(30px,7vw,55px);
-
-      font-weight: 900;
-
-      letter-spacing: 4px;
-
-      text-shadow:
-        0 0 22px #19cfff;
-    }
-
-    .device-subtitle {
-      margin:
-        12px 0 28px;
-
-      color: #aac3d3;
-
-      font-size:
-        clamp(14px,3vw,19px);
-
-      letter-spacing: 2px;
-    }
-
-    .device-buttons {
-      display: flex;
-
-      justify-content: center;
-
-      gap: 18px;
-
-      flex-wrap: wrap;
-    }
-
-    .device-button {
-      width:
-        min(280px,80vw);
-
-      min-height: 150px;
-
-      border-radius: 18px;
-
-      border:
-        1px solid
-        rgba(80,210,255,.5);
-
-      background:
-        linear-gradient(
-          145deg,
-          #0b2437,
-          #07131f
-        );
-
-      color: white;
-
-      cursor: pointer;
-
-      font-size: 42px;
-
-      transition: .18s;
-
-      touch-action: manipulation;
-    }
-
-    .device-button span {
-      display: block;
-
-      font-size: 22px;
-
-      font-weight: 900;
-
-      letter-spacing: 2px;
-
-      margin-top: 7px;
-    }
-
-    .device-button small {
-      display: block;
-
-      margin-top: 9px;
-
-      font-size: 11px;
-
-      color: #8eaabd;
-    }
-
-    .device-button:hover {
-      transform:
-        translateY(-3px);
-
-      box-shadow:
-        0 0 28px
-        rgba(40,210,255,.25);
-
-      border-color:
-        #54dcff;
-    }
-
-    .device-button:active {
-      transform:
-        scale(.97);
-    }
-  `;
-
-  document.head.appendChild(
-    style
-  );
-
-  const wrap =
-    document.createElement(
-      "div"
-    );
-
-  wrap.id =
-    "deviceChoice";
-
-  wrap.innerHTML = `
-    <div class="device-box">
-
-      <div class="device-title">
-        ROCKET LEAGUE.IO
-      </div>
-
-      <div class="device-subtitle">
-        SUR QUEL APPAREIL JOUEZ-VOUS ?
-      </div>
-
-      <div class="device-buttons">
-
-        <button
-          id="choosePC"
-          class="device-button"
-        >
-          🖥️
-          <span>PC</span>
-          <small>
-            Z / S / Q / D + ESPACE
-          </small>
-        </button>
-
-        <button
-          id="chooseMobile"
-          class="device-button"
-        >
-          📱
-          <span>MOBILE</span>
-          <small>
-            JOYSTICK + BOOST
-          </small>
-        </button>
-
-      </div>
-
-    </div>
-  `;
-
-  document.body.appendChild(
-    wrap
-  );
-
-  document
-    .getElementById("choosePC")
-    .addEventListener(
-      "click",
-      () => {
-        setDeviceMode("pc");
-
-        wrap.remove();
-        style.remove();
-
-        mainMenu?.classList.remove(
-          "hidden"
-        );
-      }
-    );
-
-  document
-    .getElementById("chooseMobile")
-    .addEventListener(
-      "click",
-      () => {
-        setDeviceMode("mobile");
-
-        wrap.remove();
-        style.remove();
-
-        mainMenu?.classList.remove(
-          "hidden"
-        );
-      }
-    );
+  return key.toUpperCase();
 }
 
-/* =========================================================
-   MODE APPAREIL
-========================================================= */
+function saveControls() {
+  localStorage.setItem(
+    "turboball-controls",
+    JSON.stringify(controls)
+  );
+}
 
-function setDeviceMode(mode) {
-  deviceMode =
-    mode === "mobile"
-      ? "mobile"
-      : "pc";
+function updateControlUI() {
+  for (const action of Object.keys(keyButtons)) {
+    if (keyButtons[action]) {
+      keyButtons[action].textContent =
+        keyName(controls[action]);
+    }
 
-  try {
-    localStorage.setItem(
-      "rocket-league-io-device",
-      deviceMode
-    );
-  } catch {}
-
-  if (
-    deviceMode === "mobile"
-  ) {
-    createMobileControls();
-  } else {
-    removeMobileControls();
+    if (howButtons[action]) {
+      howButtons[action].textContent =
+        keyName(controls[action]);
+    }
   }
 }
-
-function clearMobileInput() {
-  mobileInput.forward = false;
-  mobileInput.reverse = false;
-  mobileInput.left = false;
-  mobileInput.right = false;
-  mobileInput.boost = false;
-
-  mobileJoystick?.reset();
-}
-
-/* =========================================================
-   JOYSTICK MOBILE
-========================================================= */
-
-function createMobileControls() {
-  removeMobileControls();
-
-  const style =
-    document.createElement(
-      "style"
-    );
-
-  style.id =
-    "mobile-controls-style";
-
-  style.textContent = `
-    #mobileControls {
-      position: fixed;
-      inset: 0;
-
-      z-index: 5000;
-
-      pointer-events: none;
-
-      touch-action: none;
-    }
-
-    .touch-control {
-      position: absolute;
-
-      pointer-events: auto;
-
-      user-select: none;
-
-      -webkit-user-select: none;
-
-      touch-action: none;
-    }
-
-    #mobilePauseButton {
-      top: 20px;
-      left: 20px;
-
-      width: 55px;
-      height: 55px;
-
-      border-radius: 50%;
-
-      display: flex;
-
-      align-items: center;
-      justify-content: center;
-
-      background:
-        rgba(4,17,29,.85);
-
-      border:
-        2px solid
-        rgba(120,220,255,.7);
-
-      color: white;
-
-      font-size: 20px;
-
-      font-weight: 900;
-    }
-
-    #mobileBoostButton {
-      right: 205px;
-      bottom: 38px;
-
-      width: 95px;
-      height: 95px;
-
-      border-radius: 50%;
-
-      display: flex;
-
-      align-items: center;
-      justify-content: center;
-
-      background:
-        rgba(255,125,20,.2);
-
-      border:
-        3px solid
-        rgba(255,150,50,.9);
-
-      color: white;
-
-      font-size: 13px;
-
-      font-weight: 900;
-
-      letter-spacing: 1px;
-    }
-
-    #mobileBoostButton.active {
-      transform:
-        scale(.93);
-
-      background:
-        rgba(255,130,20,.5);
-    }
-
-    #mobileJoystick {
-      right: 22px;
-      bottom: 22px;
-
-      width: 150px;
-      height: 150px;
-
-      border-radius: 50%;
-
-      background:
-        rgba(30,80,110,.28);
-
-      border:
-        2px solid
-        rgba(120,220,255,.55);
-
-      box-shadow:
-        inset 0 0 25px
-        rgba(30,200,255,.1),
-
-        0 0 25px
-        rgba(20,180,255,.12);
-    }
-
-    #mobileJoystickKnob {
-      position: absolute;
-
-      left: 50%;
-      top: 50%;
-
-      width: 64px;
-      height: 64px;
-
-      margin:
-        -32px;
-
-      border-radius: 50%;
-
-      background:
-        rgba(80,210,255,.65);
-
-      border:
-        2px solid
-        rgba(255,255,255,.8);
-
-      box-shadow:
-        0 0 22px
-        rgba(30,200,255,.45);
-
-      transform:
-        translate(0,0);
-    }
-
-    @media(max-width:700px)
-    and (orientation:portrait) {
-
-      #mobileControls:after {
-        content:
-          "Tournez votre téléphone en paysage ↻";
-
-        position: fixed;
-
-        top: 5px;
-        left: 50%;
-
-        transform:
-          translateX(-50%);
-
-        font:
-          700 11px Arial;
-
-        color: #9fc4d7;
-
-        background:
-          rgba(0,0,0,.4);
-
-        padding:
-          6px 10px;
-
-        border-radius: 10px;
-      }
-    }
-
-    @media(max-width:500px) {
-
-      #mobileJoystick {
-        width: 125px;
-        height: 125px;
-
-        right: 12px;
-        bottom: 12px;
-      }
-
-      #mobileJoystickKnob {
-        width: 54px;
-        height: 54px;
-
-        margin: -27px;
-      }
-
-      #mobileBoostButton {
-        right: 150px;
-        bottom: 25px;
-
-        width: 82px;
-        height: 82px;
-      }
-    }
-  `;
-
-  document.head.appendChild(
-    style
-  );
-
-  const layer =
-    document.createElement(
-      "div"
-    );
-
-  layer.id =
-    "mobileControls";
-
-  layer.innerHTML = `
-    <div
-      id="mobilePauseButton"
-      class="touch-control"
-    >
-      Ⅱ
-    </div>
-
-    <div
-      id="mobileBoostButton"
-      class="touch-control"
-    >
-      BOOST
-    </div>
-
-    <div
-      id="mobileJoystick"
-      class="touch-control"
-    >
-      <div
-        id="mobileJoystickKnob"
-      ></div>
-    </div>
-  `;
-
-  document.body.appendChild(
-    layer
-  );
-
-  const joy =
-    document.getElementById(
-      "mobileJoystick"
-    );
-
-  const knob =
-    document.getElementById(
-      "mobileJoystickKnob"
-    );
-
-  const max = 52;
-
-  function moveJoystick(
-    clientX,
-    clientY
-  ) {
-    const rect =
-      joy.getBoundingClientRect();
-
-    const cx =
-      rect.left +
-      rect.width / 2;
-
-    const cy =
-      rect.top +
-      rect.height / 2;
-
-    let dx =
-      clientX - cx;
-
-    let dy =
-      clientY - cy;
-
-    const length =
-      Math.hypot(
-        dx,
-        dy
-      );
-
-    if (length > max) {
-      dx =
-        dx / length * max;
-
-      dy =
-        dy / length * max;
-    }
-
-    knob.style.transform =
-      `translate(${dx}px,${dy}px)`;
-
-    const nx =
-      dx / max;
-
-    const ny =
-      dy / max;
-
-    mobileInput.left =
-      nx < -0.22;
-
-    mobileInput.right =
-      nx > 0.22;
-
-    mobileInput.forward =
-      ny < -0.22;
-
-    mobileInput.reverse =
-      ny > 0.22;
-  }
-
-  mobileJoystick = {
-    reset() {
-      knob.style.transform =
-        "translate(0,0)";
-    }
-  };
-
-  joy.addEventListener(
-    "pointerdown",
-    e => {
-      e.preventDefault();
-
-      mobileJoystickPointer =
-        e.pointerId;
-
-      joy.setPointerCapture(
-        e.pointerId
-      );
-
-      moveJoystick(
-        e.clientX,
-        e.clientY
-      );
-    }
-  );
-
-  joy.addEventListener(
-    "pointermove",
-    e => {
-      if (
-        e.pointerId !==
-        mobileJoystickPointer
-      ) {
-        return;
-      }
-
-      moveJoystick(
-        e.clientX,
-        e.clientY
-      );
-    }
-  );
-
-  function releaseJoystick() {
-    mobileJoystickPointer =
-      null;
-
-    mobileInput.forward =
-      false;
-
-    mobileInput.reverse =
-      false;
-
-    mobileInput.left =
-      false;
-
-    mobileInput.right =
-      false;
-
-    mobileJoystick.reset();
-  }
-
-  joy.addEventListener(
-    "pointerup",
-    releaseJoystick
-  );
-
-  joy.addEventListener(
-    "pointercancel",
-    releaseJoystick
-  );
-
-  /* BOOST */
-
-  const boost =
-    document.getElementById(
-      "mobileBoostButton"
-    );
-
-  const boostOn = e => {
-    e.preventDefault();
-
-    mobileInput.boost =
-      true;
-
-    boost.classList.add(
-      "active"
-    );
-  };
-
-  const boostOff = e => {
-    e.preventDefault();
-
-    mobileInput.boost =
-      false;
-
-    boost.classList.remove(
-      "active"
-    );
-  };
-
-  boost.addEventListener(
-    "pointerdown",
-    boostOn
-  );
-
-  boost.addEventListener(
-    "pointerup",
-    boostOff
-  );
-
-  boost.addEventListener(
-    "pointercancel",
-    boostOff
-  );
-
-  boost.addEventListener(
-    "pointerleave",
-    boostOff
-  );
-
-  /* PAUSE */
-
-  document
-    .getElementById(
-      "mobilePauseButton"
-    )
-    .addEventListener(
-      "pointerdown",
-      e => {
-        e.preventDefault();
-
-        if (
-          gameRunning &&
-          !goalActive
-        ) {
-          togglePause();
-        }
-      }
-    );
-}
-
-function removeMobileControls() {
-  document
-    .getElementById(
-      "mobileControls"
-    )
-    ?.remove();
-
-  document
-    .getElementById(
-      "mobile-controls-style"
-    )
-    ?.remove();
-
-  mobileJoystick = null;
-
-  clearMobileInput();
-}
-
-/* =========================================================
-   TOUCHES PC
-========================================================= */
 
 function normalizedKey(e) {
-  if (e.code === "Space") {
-    return "space";
-  }
+  if (e.code === "Space") return "space";
 
   return e.key.toLowerCase();
 }
 
-function keyName(key) {
-  if (
-    key === " " ||
-    key === "space"
-  ) {
-    return "SPACE";
+function controlPressed(action) {
+  if (deviceMode === "mobile") {
+    return !!mobileInput[action];
   }
 
-  return key.length === 1
-    ? key.toUpperCase()
-    : key.toUpperCase();
-}
-
-function saveControls() {
-  try {
-    localStorage.setItem(
-      "rocket-league-io-controls",
-      JSON.stringify(
-        controls
-      )
-    );
-  } catch {}
-}
-
-function updateControlUI() {
-  for (
-    const action of
-    Object.keys(keyButtons)
-  ) {
-    if (
-      keyButtons[action]
-    ) {
-      keyButtons[action]
-        .textContent =
-        keyName(
-          controls[action]
-        );
-    }
-
-    if (
-      howButtons[action]
-    ) {
-      howButtons[action]
-        .textContent =
-        keyName(
-          controls[action]
-        );
-    }
-  }
-}
-
-function controlPressed(
-  action
-) {
-  if (
-    deviceMode === "mobile"
-  ) {
-    return !!mobileInput[
-      action
-    ];
-  }
-
-  return !!keys[
-    controls[action]
-  ];
+  return !!keys[controls[action]];
 }
 
 function clearKeys() {
-  for (
-    const key in keys
-  ) {
-    keys[key] = false;
+  for (const k in keys) {
+    keys[k] = false;
   }
 
   clearMobileInput();
 }
 
-/* =========================================================
-   CLAVIER
-========================================================= */
+document.addEventListener("keydown", e => {
+  if (waitingForAction) {
+    e.preventDefault();
 
-document.addEventListener(
-  "keydown",
-  e => {
-    if (
-      waitingForAction
-    ) {
-      e.preventDefault();
-
-      if (
-        e.key === "Escape"
-      ) {
-        const action =
-          waitingForAction
-            .dataset.action;
-
-        waitingForAction
-          .textContent =
-          keyName(
-            controls[action]
-          );
-
-        waitingForAction =
-          null;
-
-        return;
-      }
-
-      const action =
-        waitingForAction
-          .dataset.action;
-
-      const newKey =
-        normalizedKey(e);
-
-      if (
-        newKey === "" ||
-        newKey === "p" ||
-        newKey === "escape"
-      ) {
-        return;
-      }
-
-      const alreadyUsed =
-        Object.keys(
-          controls
-        ).find(
-          a =>
-            a !== action &&
-            controls[a] ===
-              newKey
+    if (e.key === "Escape") {
+      waitingForAction.textContent =
+        keyName(
+          controls[
+            waitingForAction.dataset.action
+          ]
         );
 
-      if (alreadyUsed) {
-        return;
-      }
-
-      controls[action] =
-        newKey;
-
-      saveControls();
-
-      updateControlUI();
-
-      waitingForAction =
-        null;
+      waitingForAction = null;
 
       return;
     }
 
-    const k =
-      normalizedKey(e);
+    const action =
+      waitingForAction.dataset.action;
+
+    const newKey = normalizedKey(e);
 
     if (
-      k === "space"
+      ["p", "escape"].includes(newKey) ||
+      newKey === ""
     ) {
-      e.preventDefault();
-    }
-
-    if (
-      gameRunning &&
-      !goalActive &&
-      k === "p"
-    ) {
-      togglePause();
       return;
     }
 
-    keys[k] = true;
-  }
-);
-
-document.addEventListener(
-  "keyup",
-  e => {
-    keys[
-      normalizedKey(e)
-    ] = false;
-  }
-);
-
-window.addEventListener(
-  "blur",
-  clearKeys
-);
-
-/* =========================================================
-   REGLAGES
-========================================================= */
-
-for (
-  const action of
-  Object.keys(keyButtons)
-) {
-  keyButtons[action]
-    ?.addEventListener(
-      "click",
-      () => {
-        if (
-          waitingForAction
-        ) {
-          return;
-        }
-
-        waitingForAction =
-          keyButtons[action];
-
-        waitingForAction
-          .dataset.action =
-          action;
-
-        waitingForAction
-          .textContent =
-          "PRESS A KEY";
-      }
+    const other = Object.keys(controls).find(
+      a =>
+        a !== action &&
+        controls[a] === newKey
     );
-}
 
-$("resetControlsButton")
-  ?.addEventListener(
+    if (other) return;
+
+    controls[action] = newKey;
+
+    saveControls();
+    updateControlUI();
+
+    waitingForAction = null;
+
+    return;
+  }
+
+  const k = normalizedKey(e);
+
+  if (k === "space") {
+    e.preventDefault();
+  }
+
+  if (
+    gameRunning &&
+    !goalActive &&
+    k === "p"
+  ) {
+    togglePause();
+    return;
+  }
+
+  keys[k] = true;
+});
+
+document.addEventListener("keyup", e => {
+  keys[normalizedKey(e)] = false;
+});
+
+window.addEventListener("blur", clearKeys);
+
+for (const action of Object.keys(keyButtons)) {
+  keyButtons[action]?.addEventListener(
     "click",
     () => {
-      controls = {
-        ...defaults
-      };
+      if (waitingForAction) return;
 
-      saveControls();
+      waitingForAction =
+        keyButtons[action];
 
-      updateControlUI();
+      waitingForAction.textContent =
+        "PRESS A KEY";
     }
   );
+}
 
-$("settingsButton")
-  ?.addEventListener(
-    "click",
-    () =>
-      openSettings("main")
-  );
+$("resetControlsButton")?.addEventListener(
+  "click",
+  () => {
+    controls = { ...defaults };
 
-$("pauseSettingsButton")
-  ?.addEventListener(
-    "click",
-    () =>
-      openSettings("pause")
-  );
+    saveControls();
+    updateControlUI();
+  }
+);
 
-function openSettings(
-  from
-) {
+// =========================
+// SETTINGS
+// =========================
+
+$("settingsButton")?.addEventListener(
+  "click",
+  () => openSettings("main")
+);
+
+$("pauseSettingsButton")?.addEventListener(
+  "click",
+  () => openSettings("pause")
+);
+
+function openSettings(from) {
   settingsReturn = from;
 
-  mainMenu?.classList.add(
-    "hidden"
-  );
+  updateMobileSettingsUI();
 
-  howToPlayMenu?.classList.add(
-    "hidden"
-  );
+  mainMenu?.classList.add("hidden");
+  howToPlayMenu?.classList.add("hidden");
+  pauseMenu?.classList.add("hidden");
 
-  pauseMenu?.classList.add(
-    "hidden"
-  );
-
-  settingsMenu?.classList.remove(
-    "hidden"
-  );
+  settingsMenu?.classList.remove("hidden");
 
   updateControlUI();
 }
 
-$("settingsBackButton")
-  ?.addEventListener(
-    "click",
-    () => {
-      settingsMenu?.classList.add(
-        "hidden"
-      );
+$("settingsBackButton")?.addEventListener(
+  "click",
+  () => {
+    settingsMenu?.classList.add("hidden");
 
-      if (
-        settingsReturn ===
-          "pause" &&
-        gameRunning
-      ) {
-        pauseMenu?.classList.remove(
-          "hidden"
-        );
-      } else {
-        mainMenu?.classList.remove(
-          "hidden"
-        );
-      }
+    if (
+      settingsReturn === "pause" &&
+      gameRunning
+    ) {
+      pauseMenu?.classList.remove("hidden");
+    } else {
+      mainMenu?.classList.remove("hidden");
     }
-  );
+  }
+);
 
-$("howToPlayButton")
-  ?.addEventListener(
-    "click",
-    () => {
-      mainMenu?.classList.add(
-        "hidden"
-      );
+$("howToPlayButton")?.addEventListener(
+  "click",
+  () => {
+    mainMenu?.classList.add("hidden");
+    howToPlayMenu?.classList.remove("hidden");
 
-      howToPlayMenu?.classList.remove(
-        "hidden"
-      );
+    updateControlUI();
+  }
+);
 
-      updateControlUI();
-    }
-  );
+$("backButton")?.addEventListener(
+  "click",
+  () => {
+    howToPlayMenu?.classList.add("hidden");
+    mainMenu?.classList.remove("hidden");
+  }
+);
 
-$("backButton")
-  ?.addEventListener(
-    "click",
-    () => {
-      howToPlayMenu?.classList.add(
-        "hidden"
-      );
-
-      mainMenu?.classList.remove(
-        "hidden"
-      );
-    }
-  );
-
-/* =========================================================
-   VARIABLES MATCH
-========================================================= */
+// =========================
+// GAME STATE
+// =========================
 
 let blueScore = 0;
 let orangeScore = 0;
-
 let playerPoints = 0;
 
 let gameTime = 120;
@@ -1427,17 +865,91 @@ let countdownTimer = null;
 let countdownFinish = null;
 let introTimer = null;
 
-let pointsTimer = null;
+let lastTime = performance.now();
 
-let lastTime =
-  performance.now();
+let pointsTimer = null;
 
 let saveCooldown = 0;
 let saveDangerHandled = false;
 
-/* =========================================================
-   TERRAIN
-========================================================= */
+let pinchCooldown = 0;
+
+// =========================
+// HELPERS
+// =========================
+
+function setText(el, value) {
+  if (el) {
+    el.textContent = value;
+  }
+}
+
+function updatePoints() {
+  setText(
+    playerPointsEl,
+    playerPoints
+  );
+}
+
+function awardPoints(amount, reason) {
+  playerPoints += amount;
+
+  updatePoints();
+
+  if (pointsNotification) {
+    clearTimeout(pointsTimer);
+
+    pointsNotification.textContent =
+      `+${amount} ${reason}`;
+
+    pointsNotification.classList.remove(
+      "show"
+    );
+
+    void pointsNotification.offsetWidth;
+
+    pointsNotification.classList.add(
+      "show"
+    );
+
+    pointsTimer = setTimeout(
+      () =>
+        pointsNotification.classList.remove(
+          "show"
+        ),
+      1100
+    );
+  }
+
+  pointsPanel?.classList.remove(
+    "earned"
+  );
+
+  if (pointsPanel) {
+    void pointsPanel.offsetWidth;
+
+    pointsPanel.classList.add(
+      "earned"
+    );
+  }
+}
+
+function resetPoints() {
+  playerPoints = 0;
+
+  saveCooldown = 0;
+  saveDangerHandled = false;
+
+  updatePoints();
+
+  pointsNotification?.classList.remove(
+    "show"
+  );
+}
+
+// =========================
+// ARENA
+// =========================
 
 const field = {
   left: 90,
@@ -1453,23 +965,14 @@ const goal = {
 };
 
 const saveZone = {
-  x:
-    field.left + 10,
-
-  y:
-    goal.top + 12,
-
+  x: field.left + 10,
+  y: goal.top + 12,
   width: 145,
-
   height:
     goal.bottom -
     goal.top -
     24
 };
-
-/* =========================================================
-   BOOST PADS
-========================================================= */
 
 const boostPads = [
   {
@@ -1532,24 +1035,16 @@ const goalParticles = [];
 
 let goalFlash = 0;
 
-/* =========================================================
-   VOITURE
-========================================================= */
+// =========================
+// CAR
+// =========================
 
 class Car {
-
-  constructor(
-    x,
-    y,
-    color,
-    bot = false
-  ) {
-
+  constructor(x, y, color, bot = false) {
     this.startX = x;
     this.startY = y;
 
     this.color = color;
-
     this.isBot = bot;
 
     this.radius = 25;
@@ -1558,90 +1053,60 @@ class Car {
     this.y = y;
 
     this.angle =
-      bot
-        ? Math.PI
-        : 0;
+      bot ? Math.PI : 0;
 
     this.speed = 0;
 
-    this.maxSpeed =
-      7.2;
-
-    this.boostMax =
-      11.7;
+    this.maxSpeed = 7.2;
+    this.boostMax = 11.7;
 
     this.boost = 100;
 
-    this.boosting =
-      false;
+    this.boosting = false;
 
-    this.ballContact =
-      false;
+    this.ballContact = false;
 
-    this.aiTarget =
-      null;
-
+    this.aiTarget = null;
     this.aiThink = 0;
   }
 
   reset() {
-
-    this.x =
-      this.startX;
-
-    this.y =
-      this.startY;
+    this.x = this.startX;
+    this.y = this.startY;
 
     this.angle =
-      this.isBot
-        ? Math.PI
-        : 0;
+      this.isBot ? Math.PI : 0;
 
     this.speed = 0;
 
     this.boost = 100;
 
-    this.boosting =
-      false;
+    this.boosting = false;
 
-    this.ballContact =
-      false;
+    this.ballContact = false;
 
-    this.aiTarget =
-      null;
-
-    this.aiThink = 0;
+    this.aiTarget = null;
   }
 
   update() {
-
-    if (
-      this.isBot
-    ) {
+    if (this.isBot) {
       this.updateAI();
     } else {
       this.updatePlayer();
     }
 
     this.x +=
-      Math.cos(
-        this.angle
-      ) *
+      Math.cos(this.angle) *
       this.speed;
 
     this.y +=
-      Math.sin(
-        this.angle
-      ) *
+      Math.sin(this.angle) *
       this.speed;
 
-    this.speed *=
-      0.985;
+    this.speed *= 0.985;
 
     if (
-      Math.abs(
-        this.speed
-      ) < 0.02
+      Math.abs(this.speed) < 0.02
     ) {
       this.speed = 0;
     }
@@ -1651,246 +1116,161 @@ class Car {
     this.boost =
       Math.min(
         100,
-        this.boost +
-          0.025
+        this.boost + 0.025
       );
   }
 
   updatePlayer() {
+    this.boosting = false;
 
-    this.boosting =
-      false;
-
-    if (
-      controlPressed(
-        "forward"
-      )
-    ) {
-      this.speed +=
-        0.18;
+    if (controlPressed("forward")) {
+      this.speed += 0.18;
     }
 
-    if (
-      controlPressed(
-        "reverse"
-      )
-    ) {
-      if (
-        this.speed > 0
-      ) {
-        this.speed -=
-          0.25;
+    if (controlPressed("reverse")) {
+      if (this.speed > 0) {
+        this.speed -= 0.25;
       } else {
-        this.speed -=
-          0.12;
+        this.speed -= 0.12;
       }
     }
 
     const turn =
       0.055 *
       Math.min(
-        Math.abs(
-          this.speed
-        ) / 2 +
+        Math.abs(this.speed) / 2 +
           0.3,
         1
       );
 
-    if (
-      controlPressed(
-        "left"
-      )
-    ) {
+    if (controlPressed("left")) {
       this.angle -=
         turn *
-        (
-          this.speed >= 0
-            ? 1
-            : -1
-        );
+        (this.speed >= 0
+          ? 1
+          : -1);
     }
 
-    if (
-      controlPressed(
-        "right"
-      )
-    ) {
+    if (controlPressed("right")) {
       this.angle +=
         turn *
-        (
-          this.speed >= 0
-            ? 1
-            : -1
-        );
+        (this.speed >= 0
+          ? 1
+          : -1);
     }
 
     if (
-      controlPressed(
-        "boost"
-      ) &&
+      controlPressed("boost") &&
       this.boost > 0 &&
       this.speed > 0
     ) {
-      this.speed +=
-        0.28;
+      this.speed += 0.28;
 
-      this.boost -=
-        0.7;
+      this.boost -= 0.7;
 
-      this.boosting =
-        true;
+      this.boosting = true;
     }
 
-    this.speed =
-      Math.max(
-        -3.2,
-        Math.min(
-          this.speed,
-          this.boosting
-            ? this.boostMax
-            : this.maxSpeed
-        )
-      );
+    this.speed = Math.max(
+      -3.2,
+      Math.min(
+        this.speed,
+        this.boosting
+          ? this.boostMax
+          : this.maxSpeed
+      )
+    );
   }
 
-  /* =======================================================
-     IA
-  ======================================================= */
-
   updateAI() {
+    const dxBall =
+      ball.x - this.x;
 
-    const dx =
-      ball.x -
-      this.x;
+    const dyBall =
+      ball.y - this.y;
 
-    const dy =
-      ball.y -
-      this.y;
-
-    const dist =
+    const distBall =
       Math.hypot(
-        dx,
-        dy
+        dxBall,
+        dyBall
       );
 
-    let tx =
-      ball.x;
-
-    let ty =
-      ball.y;
-
-    const dangerous =
-      ball.x >
-        field.right -
-          270 &&
-      ball.vx > 0;
+    let tx = ball.x;
+    let ty = ball.y;
 
     if (
-      dangerous
+      ball.x >
+        field.right - 270 &&
+      ball.vx > 0
     ) {
-
       tx =
         Math.min(
-          field.right -
-            55,
+          field.right - 55,
           ball.x + 55
         );
 
       ty =
         H / 2 +
-        (
-          ball.y -
-          H / 2
-        ) *
+        (ball.y - H / 2) *
           0.7;
-
     } else if (
-      ball.x <
-      W * 0.42
+      ball.x < W * 0.42
     ) {
-
-      tx =
-        ball.x + 45;
-
-      ty =
-        ball.y;
+      tx = ball.x + 45;
+      ty = ball.y;
     }
 
-    this.aiThink -=
-      1 / 60;
+    this.aiThink -= 1 / 60;
+
+    const dangerous =
+      ball.x >
+        field.right - 270 &&
+      ball.vx > 0;
 
     if (
       this.boost < 25 &&
-      dist > 180 &&
+      distBall > 180 &&
       !dangerous
     ) {
-
       if (
         !this.aiTarget ||
         this.aiThink <= 0 ||
-        this.aiTarget
-          .cooldown > 0
+        this.aiTarget.cooldown > 0
       ) {
-
-        let best =
-          null;
-
-        let bestD =
-          Infinity;
+        let best = null;
+        let bestD = Infinity;
 
         for (
-          const pad of
-          boostPads
+          const pad of boostPads
         ) {
-
-          if (
-            pad.cooldown >
-            0
-          ) {
+          if (pad.cooldown > 0)
             continue;
-          }
 
           const d =
             Math.hypot(
-              pad.x -
-                this.x,
-              pad.y -
-                this.y
+              pad.x - this.x,
+              pad.y - this.y
             );
 
-          if (
-            d < bestD
-          ) {
+          if (d < bestD) {
             bestD = d;
             best = pad;
           }
         }
 
-        this.aiTarget =
-          best;
-
-        this.aiThink =
-          0.5;
+        this.aiTarget = best;
+        this.aiThink = 0.5;
       }
 
-      if (
-        this.aiTarget
-      ) {
-
-        tx =
-          this.aiTarget.x;
-
-        ty =
-          this.aiTarget.y;
+      if (this.aiTarget) {
+        tx = this.aiTarget.x;
+        ty = this.aiTarget.y;
       }
-
     } else if (
       this.boost > 45 ||
       dangerous
     ) {
-
-      this.aiTarget =
-        null;
+      this.aiTarget = null;
     }
 
     const targetAngle =
@@ -1900,50 +1280,36 @@ class Car {
       );
 
     let diff =
-      targetAngle -
-      this.angle;
+      targetAngle - this.angle;
 
-    while (
-      diff > Math.PI
-    ) {
-      diff -=
-        Math.PI * 2;
+    while (diff > Math.PI) {
+      diff -= Math.PI * 2;
     }
 
-    while (
-      diff < -Math.PI
-    ) {
-      diff +=
-        Math.PI * 2;
+    while (diff < -Math.PI) {
+      diff += Math.PI * 2;
     }
 
-    if (
-      diff > 0.06
-    ) {
-      this.angle +=
-        0.062;
-    } else if (
-      diff < -0.06
-    ) {
-      this.angle -=
-        0.062;
+    const turn = 0.062;
+
+    if (diff > 0.06) {
+      this.angle += turn;
+    } else if (diff < -0.06) {
+      this.angle -= turn;
     }
 
     const aligned =
-      Math.abs(diff) <
-      0.32;
+      Math.abs(diff) < 0.32;
 
     const attack =
-      ball.x <
-        W * 0.55 &&
-      this.x >
-        ball.x;
+      ball.x < W * 0.55 &&
+      this.x > ball.x;
 
     this.boosting =
       this.boost > 4 &&
       aligned &&
       (
-        dist > 260 ||
+        distBall > 260 ||
         attack ||
         !!this.aiTarget
       );
@@ -1953,25 +1319,18 @@ class Car {
         ? 0.24
         : 0.145;
 
-    if (
-      this.boosting
-    ) {
-      this.boost -=
-        0.55;
+    if (this.boosting) {
+      this.boost -= 0.55;
     }
 
-    this.speed =
-      Math.min(
-        this.speed,
-        this.boosting
-          ? 9.6
-          : 6.7
-      );
+    this.speed = Math.min(
+      this.speed,
+      this.boosting
+        ? 9.6
+        : 6.7
+    );
 
-    if (
-      this.aiTarget
-    ) {
-
+    if (this.aiTarget) {
       const d =
         Math.hypot(
           this.aiTarget.x -
@@ -1982,91 +1341,72 @@ class Car {
 
       if (
         d <
-          this.radius +
-            22 &&
-        this.aiTarget
-          .cooldown <= 0
+          this.radius + 22 &&
+        this.aiTarget.cooldown <= 0
       ) {
-
         this.boost =
           Math.min(
             100,
-            this.boost +
-              25
+            this.boost + 25
           );
 
-        this.aiTarget
-          .cooldown = 5;
-
-        this.aiTarget
-          .flash = 1;
+        this.aiTarget.cooldown = 5;
+        this.aiTarget.flash = 1;
 
         spawnPadParticles(
           this.aiTarget
         );
 
-        this.aiTarget =
-          null;
+        this.aiTarget = null;
       }
     }
   }
 
   keepInside() {
-
-    const r =
-      this.radius;
+    const r = this.radius;
 
     if (
       this.x <
       field.left + r
     ) {
-
       this.x =
         field.left + r;
 
-      this.speed *=
-        -0.3;
+      this.speed *= -0.3;
     }
 
     if (
       this.x >
       field.right - r
     ) {
-
       this.x =
         field.right - r;
 
-      this.speed *=
-        -0.3;
+      this.speed *= -0.3;
     }
 
     if (
       this.y <
       field.top + r
     ) {
-
       this.y =
         field.top + r;
 
-      this.speed *=
-        -0.3;
+      this.speed *= -0.3;
     }
 
     if (
       this.y >
       field.bottom - r
     ) {
-
       this.y =
         field.bottom - r;
 
-      this.speed *=
-        -0.3;
+      this.speed *= -0.3;
     }
   }
 
   draw() {
-
     ctx.save();
 
     ctx.translate(
@@ -2074,14 +1414,9 @@ class Car {
       this.y
     );
 
-    ctx.rotate(
-      this.angle
-    );
+    ctx.rotate(this.angle);
 
-    if (
-      this.boosting
-    ) {
-
+    if (this.boosting) {
       ctx.fillStyle =
         "rgba(80,220,255,.7)";
 
@@ -2094,8 +1429,7 @@ class Car {
 
       ctx.lineTo(
         -65 -
-          Math.random() *
-            18,
+          Math.random() * 18,
         0
       );
 
@@ -2110,8 +1444,7 @@ class Car {
     ctx.shadowColor =
       this.color;
 
-    ctx.shadowBlur =
-      18;
+    ctx.shadowBlur = 18;
 
     ctx.fillStyle =
       this.color;
@@ -2126,8 +1459,7 @@ class Car {
 
     ctx.fill();
 
-    ctx.shadowBlur =
-      0;
+    ctx.shadowBlur = 0;
 
     ctx.fillStyle =
       "#08101a";
@@ -2194,123 +1526,54 @@ class Car {
   }
 }
 
-/* =========================================================
-   BALLON
-========================================================= */
+// =========================
+// BALL
+// =========================
 
 class Ball {
-
   constructor() {
-
-    this.radius =
-      18;
-
-    this.vx = 0;
-    this.vy = 0;
-
-    this.previousSpeed =
-      0;
-
-    this.pinchTimer =
-      0;
+    this.radius = 18;
 
     this.reset();
   }
 
   reset() {
-
-    this.x =
-      W / 2;
-
-    this.y =
-      H / 2;
+    this.x = W / 2;
+    this.y = H / 2;
 
     this.vx = 0;
-
     this.vy = 0;
-
-    this.previousSpeed =
-      0;
-
-    this.pinchTimer =
-      0;
-  }
-
-  getSpeed() {
-
-    return Math.hypot(
-      this.vx,
-      this.vy
-    );
-  }
-
-  getSpeedKmh() {
-
-    /*
-      9 unités/s = 216 km/h
-    */
-
-    return Math.round(
-      Math.min(
-        216,
-        this.getSpeed() *
-          (216 / 9)
-      )
-    );
   }
 
   update() {
+    this.x += this.vx;
+    this.y += this.vy;
 
-    this.x +=
-      this.vx;
+    this.vx *= 0.992;
+    this.vy *= 0.992;
 
-    this.y +=
-      this.vy;
-
-    this.vx *=
-      0.992;
-
-    this.vy *=
-      0.992;
-
-    const speed =
-      this.getSpeed();
-
-    this.previousSpeed =
-      speed;
-
-    if (
-      speed > 9
-    ) {
-
-      const ratio =
-        9 / speed;
-
-      this.vx *=
-        ratio;
-
-      this.vy *=
-        ratio;
-    }
-
-    this.pinchTimer =
-      Math.max(
-        0,
-        this.pinchTimer -
-          1 / 60
+    const s =
+      Math.hypot(
+        this.vx,
+        this.vy
       );
+
+    if (s > 9) {
+      this.vx =
+        this.vx / s * 9;
+
+      this.vy =
+        this.vy / s * 9;
+    }
 
     this.checkGoal();
 
-    if (
-      !goalActive
-    ) {
+    if (!goalActive) {
       this.walls();
     }
   }
 
   checkGoal() {
-
     const inOpening =
       this.y +
         this.radius >
@@ -2319,48 +1582,34 @@ class Ball {
         this.radius <
         goal.bottom;
 
-    if (
-      !inOpening
-    ) {
-      return;
-    }
+    if (!inOpening) return;
 
     if (
       this.x -
         this.radius <=
       field.left - 2
     ) {
-
-      scoreGoal(
-        "orange"
-      );
-
+      scoreGoal("orange");
     } else if (
       this.x +
         this.radius >=
       field.right + 2
     ) {
-
-      scoreGoal(
-        "blue"
-      );
+      scoreGoal("blue");
     }
   }
 
   walls() {
-
     if (
       this.y -
         this.radius <
       field.top
     ) {
-
       this.y =
         field.top +
         this.radius;
 
-      this.vy *=
-        -0.82;
+      this.vy *= -0.82;
     }
 
     if (
@@ -2368,13 +1617,11 @@ class Ball {
         this.radius >
       field.bottom
     ) {
-
       this.y =
         field.bottom -
         this.radius;
 
-      this.vy *=
-        -0.82;
+      this.vy *= -0.82;
     }
 
     const inOpening =
@@ -2391,13 +1638,11 @@ class Ball {
         field.left &&
       !inOpening
     ) {
-
       this.x =
         field.left +
         this.radius;
 
-      this.vx *=
-        -0.82;
+      this.vx *= -0.82;
     }
 
     if (
@@ -2406,59 +1651,51 @@ class Ball {
         field.right &&
       !inOpening
     ) {
-
       this.x =
         field.right -
         this.radius;
 
-      this.vx *=
-        -0.82;
+      this.vx *= -0.82;
     }
 
     if (
       inOpening &&
       this.x <
         field.left -
-        goal.depth +
-        this.radius
+          goal.depth +
+          this.radius
     ) {
-
       this.x =
         field.left -
         goal.depth +
         this.radius;
 
-      this.vx *=
-        -0.82;
+      this.vx *= -0.82;
     }
 
     if (
       inOpening &&
       this.x >
         field.right +
-        goal.depth -
-        this.radius
+          goal.depth -
+          this.radius
     ) {
-
       this.x =
         field.right +
         goal.depth -
         this.radius;
 
-      this.vx *=
-        -0.82;
+      this.vx *= -0.82;
     }
   }
 
   draw() {
-
     ctx.save();
 
     ctx.shadowColor =
       "#fff";
 
-    ctx.shadowBlur =
-      18;
+    ctx.shadowBlur = 18;
 
     const g =
       ctx.createRadialGradient(
@@ -2476,7 +1713,7 @@ class Ball {
     );
 
     g.addColorStop(
-      .55,
+      0.55,
       "#dce7f0"
     );
 
@@ -2485,8 +1722,7 @@ class Ball {
       "#7d91a3"
     );
 
-    ctx.fillStyle =
-      g;
+    ctx.fillStyle = g;
 
     ctx.beginPath();
 
@@ -2504,9 +1740,9 @@ class Ball {
   }
 }
 
-/* =========================================================
-   OBJETS
-========================================================= */
+// =========================
+// OBJECTS
+// =========================
 
 const player =
   new Car(
@@ -2526,23 +1762,17 @@ const bot =
 const ball =
   new Ball();
 
-/* =========================================================
-   SAUVEGARDE
-========================================================= */
+// =========================
+// SAVE
+// =========================
 
 function playerInSaveZone() {
-
   return (
-    player.x >=
-      saveZone.x &&
-
+    player.x >= saveZone.x &&
     player.x <=
       saveZone.x +
         saveZone.width &&
-
-    player.y >=
-      saveZone.y &&
-
+    player.y >= saveZone.y &&
     player.y <=
       saveZone.y +
         saveZone.height
@@ -2550,7 +1780,6 @@ function playerInSaveZone() {
 }
 
 function ballDangerous() {
-
   const inLane =
     ball.y +
       ball.radius >
@@ -2567,30 +1796,23 @@ function ballDangerous() {
     inLane &&
     close &&
     (
-      ball.vx <
-        -0.1 ||
+      ball.vx < -0.1 ||
       ball.x <
         field.left + 105
     )
   );
 }
 
-/* =========================================================
-   COLLISION VOITURE / BALLE
-   + PINCH
-========================================================= */
+// =========================
+// CAR + BALL
+// =========================
 
-function carBallCollision(
-  car
-) {
-
+function carBallCollision(car) {
   const dx =
-    ball.x -
-    car.x;
+    ball.x - car.x;
 
   const dy =
-    ball.y -
-    car.y;
+    ball.y - car.y;
 
   const d =
     Math.hypot(
@@ -2602,13 +1824,8 @@ function carBallCollision(
     car.radius +
     ball.radius;
 
-  if (
-    d >= minD
-  ) {
-
-    car.ballContact =
-      false;
-
+  if (d >= minD) {
+    car.ballContact = false;
     return;
   }
 
@@ -2619,14 +1836,12 @@ function carBallCollision(
   const newContact =
     !car.ballContact;
 
-  car.ballContact =
-    true;
+  car.ballContact = true;
 
   if (
     car === player &&
     newContact
   ) {
-
     awardPoints(
       2,
       "BALL TOUCH"
@@ -2651,19 +1866,12 @@ function carBallCollision(
   ball.y +=
     ny * overlap;
 
-  const ballBefore =
-    ball.getSpeed();
-
-  /*
-    Collision normale
-  */
+  const carVelocity =
+    Math.abs(car.speed);
 
   const force =
     Math.min(
-      Math.abs(
-        car.speed
-      ) *
-        1.15 +
+      carVelocity * 1.15 +
         1.2,
       7
     );
@@ -2674,206 +1882,105 @@ function carBallCollision(
   ball.vy +=
     ny * force;
 
-  /*
-    Direction de la voiture
-  */
-
   ball.vx +=
-    Math.cos(
-      car.angle
-    ) *
-    Math.abs(
-      car.speed
-    ) *
+    Math.cos(car.angle) *
+    carVelocity *
     0.25;
 
   ball.vy +=
-    Math.sin(
-      car.angle
-    ) *
-    Math.abs(
-      car.speed
-    ) *
+    Math.sin(car.angle) *
+    carVelocity *
     0.25;
 
-  /*
-    PINCH
-    Si la voiture arrive très vite
-    contre une balle proche d'une
-    surface ou si la vitesse relative
-    est importante, on donne un gros
-    boost à la balle.
-  */
+  // =========================
+  // PINCH
+  // =========================
 
-  const carVX =
-    Math.cos(
-      car.angle
-    ) *
-    car.speed;
+  const carDirX =
+    Math.cos(car.angle);
 
-  const carVY =
-    Math.sin(
-      car.angle
-    ) *
-    car.speed;
+  const carDirY =
+    Math.sin(car.angle);
 
-  const relativeVX =
-    carVX -
-    ball.vx;
-
-  const relativeVY =
-    carVY -
-    ball.vy;
-
-  const relativeSpeed =
-    Math.hypot(
-      relativeVX,
-      relativeVY
-    );
-
-  const forwardImpact =
-    relativeVX * nx +
-    relativeVY * ny;
-
-  const nearWall =
-    ball.x <
-      field.left + 42 ||
-    ball.x >
-      field.right - 42 ||
-    ball.y <
-      field.top + 42 ||
-    ball.y >
-      field.bottom - 42;
-
-  const pinch =
-    Math.abs(
-      forwardImpact
-    ) > 5.0 &&
-    relativeSpeed > 5.5 &&
-    (
-      nearWall ||
-      Math.abs(
-        car.speed
-      ) > 5.5
-    );
+  const approach =
+    carDirX * nx +
+    carDirY * ny;
 
   if (
-    pinch
+    pinchCooldown <= 0 &&
+    carVelocity > 4.2 &&
+    approach > 0.35 &&
+    d < minD * 0.78
   ) {
-
-    const direction =
-      car.speed >= 0
-        ? 1
-        : -1;
-
     const pinchPower =
       Math.min(
-        9,
-        Math.max(
-          ball.getSpeed(),
-          relativeSpeed *
-            1.25
-        )
+        10.5,
+        4.8 +
+          carVelocity *
+            0.72
       );
 
-    const targetVX =
+    ball.vx +=
+      carDirX *
+        pinchPower +
       nx *
-      pinchPower *
-      direction;
+        pinchPower *
+        0.45;
 
-    const targetVY =
+    ball.vy +=
+      carDirY *
+        pinchPower +
       ny *
-      pinchPower *
-      direction;
+        pinchPower *
+        0.45;
 
-    ball.vx =
-      ball.vx * 0.18 +
-      targetVX * 0.82;
-
-    ball.vy =
-      ball.vy * 0.18 +
-      targetVY * 0.82;
-
-    ball.pinchTimer =
-      0.45;
-
-    showPinchEffect();
-
-  } else {
-
-    /*
-      Petite accélération
-      supplémentaire pour les
-      grosses frappes.
-    */
-
-    if (
-      relativeSpeed > 7
-    ) {
-
-      ball.vx *=
-        1.06;
-
-      ball.vy *=
-        1.06;
-    }
+    pinchCooldown = 0.12;
   }
 
-  /*
-    Limite physique :
-    216 km/h
-  */
+  const ballMaxInternal = 9;
 
-  const finalSpeed =
-    ball.getSpeed();
+  const ballSpeedNow =
+    Math.hypot(
+      ball.vx,
+      ball.vy
+    );
 
   if (
-    finalSpeed > 9
+    ballSpeedNow >
+    ballMaxInternal
   ) {
+    ball.vx =
+      ball.vx /
+      ballSpeedNow *
+      ballMaxInternal;
 
-    const ratio =
-      9 /
-      finalSpeed;
-
-    ball.vx *=
-      ratio;
-
-    ball.vy *=
-      ratio;
+    ball.vy =
+      ball.vy /
+      ballSpeedNow *
+      ballMaxInternal;
   }
 
-  car.speed *=
-    0.82;
-
-  /*
-    SAVE
-  */
+  car.speed *= 0.82;
 
   if (
     car === player &&
     newContact &&
     dangerousBefore &&
     playerInSaveZone() &&
-    saveCooldown <= 0 &&
-    !saveDangerHandled
+    saveCooldown <= 0
   ) {
+    saveCooldown = 4;
 
-    saveCooldown =
-      4;
-
-    saveDangerHandled =
-      true;
+    saveDangerHandled = true;
 
     ball.vx =
       Math.max(
         1.8,
-        Math.abs(
-          ball.vx
-        ) * 0.65
+        Math.abs(ball.vx) *
+          0.65
       );
 
-    ball.vy *=
-      0.65;
+    ball.vy *= 0.65;
 
     awardPoints(
       50,
@@ -2882,54 +1989,16 @@ function carBallCollision(
   }
 }
 
-/* =========================================================
-   EFFET PINCH
-========================================================= */
+// =========================
+// CAR + CAR
+// =========================
 
-let pinchEffectTimer = 0;
-
-function showPinchEffect() {
-
-  pinchEffectTimer =
-    0.35;
-
-  if (
-    ballSpeedPanel
-  ) {
-
-    ballSpeedPanel
-      .classList.add(
-        "pinch"
-      );
-
-    setTimeout(
-      () => {
-        ballSpeedPanel
-          ?.classList.remove(
-            "pinch"
-          );
-      },
-      300
-    );
-  }
-}
-
-/* =========================================================
-   COLLISION VOITURE / VOITURE
-========================================================= */
-
-function carCarCollision(
-  a,
-  b
-) {
-
+function carCarCollision(a, b) {
   const dx =
-    b.x -
-    a.x;
+    b.x - a.x;
 
   const dy =
-    b.y -
-    a.y;
+    b.y - a.y;
 
   const d =
     Math.hypot(
@@ -2958,54 +2027,40 @@ function carCarCollision(
     minD - d;
 
   a.x -=
-    nx *
-    overlap /
-    2;
+    nx * overlap / 2;
 
   a.y -=
-    ny *
-    overlap /
-    2;
+    ny * overlap / 2;
 
   b.x +=
-    nx *
-    overlap /
-    2;
+    nx * overlap / 2;
 
   b.y +=
-    ny *
-    overlap /
-    2;
+    ny * overlap / 2;
 
   const av =
     a.speed;
 
   a.speed =
-    b.speed *
-    0.55;
+    b.speed * 0.55;
 
   b.speed =
-    av *
-    0.55;
+    av * 0.55;
 
   a.keepInside();
   b.keepInside();
 }
 
-/* =========================================================
-   PARTICULES
-========================================================= */
+// =========================
+// PARTICLES
+// =========================
 
-function spawnPadParticles(
-  pad
-) {
-
+function spawnPadParticles(pad) {
   for (
     let i = 0;
     i < 10;
     i++
   ) {
-
     const a =
       Math.PI *
       2 *
@@ -3015,37 +2070,29 @@ function spawnPadParticles(
     const s =
       1.2 +
       Math.random() *
-      1.4;
+        1.4;
 
     boostParticles.push({
       x: pad.x,
       y: pad.y,
-
       vx:
         Math.cos(a) *
         s,
-
       vy:
         Math.sin(a) *
         s,
-
-      life: .55,
-
+      life: 0.55,
       size:
         2 +
         Math.random() *
-        2,
-
+          2,
       color:
         pad.color
     });
   }
 }
 
-function spawnGoalParticles(
-  team
-) {
-
+function spawnGoalParticles(team) {
   const color =
     team === "blue"
       ? "#43d9ff"
@@ -3056,7 +2103,6 @@ function spawnGoalParticles(
     i < 32;
     i++
   ) {
-
     const a =
       Math.random() *
       Math.PI *
@@ -3065,44 +2111,32 @@ function spawnGoalParticles(
     const s =
       1.5 +
       Math.random() *
-      3.5;
+        3.5;
 
     goalParticles.push({
       x: W / 2,
       y: H / 2,
-
       vx:
         Math.cos(a) *
         s,
-
       vy:
         Math.sin(a) *
         s,
-
       life: 1.1,
-
       size:
         2 +
         Math.random() *
-        4,
-
+          4,
       color
     });
   }
 }
 
-/* =========================================================
-   EFFETS
-========================================================= */
-
-function updateEffects(
-  dt
-) {
-
+function updateEffects(dt) {
   const sec =
     Math.min(
       dt / 1000,
-      .1
+      0.1
     );
 
   goalFlash =
@@ -3112,38 +2146,22 @@ function updateEffects(
         sec * 2.2
     );
 
-  pinchEffectTimer =
-    Math.max(
-      0,
-      pinchEffectTimer -
-        sec
-    );
-
   for (
     const list of [
       boostParticles,
       goalParticles
     ]
   ) {
-
     for (
       const p of list
     ) {
+      p.x += p.vx;
+      p.y += p.vy;
 
-      p.x +=
-        p.vx;
+      p.vx *= 0.97;
+      p.vy *= 0.97;
 
-      p.y +=
-        p.vy;
-
-      p.vx *=
-        .97;
-
-      p.vy *=
-        .97;
-
-      p.life -=
-        sec;
+      p.life -= sec;
     }
 
     for (
@@ -3152,15 +2170,10 @@ function updateEffects(
       i >= 0;
       i--
     ) {
-
       if (
-        list[i].life <=
-        0
+        list[i].life <= 0
       ) {
-        list.splice(
-          i,
-          1
-        );
+        list.splice(i, 1);
       }
     }
   }
@@ -3172,32 +2185,32 @@ function updateEffects(
         sec
     );
 
-  if (
-    !ballDangerous()
-  ) {
-    saveDangerHandled =
-      false;
+  pinchCooldown =
+    Math.max(
+      0,
+      pinchCooldown -
+        sec
+    );
+
+  if (!ballDangerous()) {
+    saveDangerHandled = false;
   }
 }
 
-/* =========================================================
-   BOOST
-========================================================= */
+// =========================
+// BOOST PADS
+// =========================
 
-function updateBoostPads(
-  dt
-) {
-
+function updateBoostPads(dt) {
   const sec =
     Math.min(
       dt / 1000,
-      .1
+      0.1
     );
 
   for (
     const p of boostPads
   ) {
-
     p.cooldown =
       Math.max(
         0,
@@ -3227,55 +2240,38 @@ function updateBoostPads(
   for (
     const p of boostPads
   ) {
-
     if (
       p.cooldown > 0
     ) {
       continue;
     }
 
-    const playerDistance =
-      Math.hypot(
-        player.x -
-          p.x,
-        player.y -
-          p.y
-      );
-
     if (
-      playerDistance <
-      player.radius +
-        22
+      Math.hypot(
+        player.x - p.x,
+        player.y - p.y
+      ) <
+      player.radius + 22
     ) {
-
       player.boost =
         Math.min(
           100,
-          player.boost +
-            25
+          player.boost + 25
         );
 
-      p.cooldown =
-        5;
+      p.cooldown = 5;
+      p.flash = 1;
 
-      p.flash =
-        1;
-
-      spawnPadParticles(
-        p
-      );
+      spawnPadParticles(p);
     }
   }
 }
 
-/* =========================================================
-   BUT
-========================================================= */
+// =========================
+// GOAL
+// =========================
 
-function scoreGoal(
-  team
-) {
-
+function scoreGoal(team) {
   if (
     goalActive ||
     !gameRunning
@@ -3283,22 +2279,17 @@ function scoreGoal(
     return;
   }
 
-  goalActive =
-    true;
+  goalActive = true;
 
   clearKeys();
 
-  goalFlash =
-    1;
+  updateMobilePadInteractivity();
 
-  spawnGoalParticles(
-    team
-  );
+  goalFlash = 1;
 
-  if (
-    team === "blue"
-  ) {
+  spawnGoalParticles(team);
 
+  if (team === "blue") {
     blueScore++;
 
     setText(
@@ -3321,19 +2312,14 @@ function scoreGoal(
       "BLUE UNIT SCORES"
     );
 
-    if (
-      goalText
-    ) {
-
+    if (goalText) {
       goalText.style.color =
         "#43d9ff";
 
       goalText.style.textShadow =
         "0 0 25px #00aaff,0 0 80px #0077ff";
     }
-
   } else {
-
     orangeScore++;
 
     setText(
@@ -3351,10 +2337,7 @@ function scoreGoal(
       "ORANGE CREW SCORES"
     );
 
-    if (
-      goalText
-    ) {
-
+    if (goalText) {
       goalText.style.color =
         "#ff9d2e";
 
@@ -3368,44 +2351,30 @@ function scoreGoal(
   );
 
   goalTimer =
-    setTimeout(
-      () => {
+    setTimeout(() => {
+      goalMessage?.classList.add(
+        "hidden"
+      );
 
-        goalMessage?.classList.add(
-          "hidden"
-        );
+      resetPositions();
 
-        resetPositions();
-
-        startCountdown();
-
-      },
-      1800
-    );
+      startCountdown();
+    }, 1800);
 }
-
-/* =========================================================
-   RESET
-========================================================= */
 
 function resetPositions() {
-
   player.reset();
-
   bot.reset();
-
   ball.reset();
 
-  saveDangerHandled =
-    false;
+  saveDangerHandled = false;
 }
 
-/* =========================================================
-   COUNTDOWN
-========================================================= */
+// =========================
+// COUNTDOWN
+// =========================
 
 function startCountdown() {
-
   clearInterval(
     countdownTimer
   );
@@ -3414,11 +2383,9 @@ function startCountdown() {
     countdownFinish
   );
 
-  goalActive =
-    true;
+  goalActive = true;
 
-  let count =
-    3;
+  let count = 3;
 
   setText(
     countdownEl,
@@ -3430,63 +2397,45 @@ function startCountdown() {
   );
 
   countdownTimer =
-    setInterval(
-      () => {
+    setInterval(() => {
+      count--;
 
-        count--;
+      if (count > 0) {
+        setText(
+          countdownEl,
+          count
+        );
+      } else {
+        clearInterval(
+          countdownTimer
+        );
 
-        if (
-          count > 0
-        ) {
+        countdownTimer = null;
 
-          setText(
-            countdownEl,
-            count
-          );
+        setText(
+          countdownEl,
+          "GO!"
+        );
 
-        } else {
-
-          clearInterval(
-            countdownTimer
-          );
-
-          countdownTimer =
-            null;
-
-          setText(
-            countdownEl,
-            "GO!"
-          );
-
-          countdownFinish =
-            setTimeout(
-              () => {
-
-                countdownEl?.classList.add(
-                  "hidden"
-                );
-
-                goalActive =
-                  false;
-
-              },
-              700
+        countdownFinish =
+          setTimeout(() => {
+            countdownEl?.classList.add(
+              "hidden"
             );
-        }
 
-      },
-      1000
-    );
+            goalActive = false;
+
+            updateMobilePadInteractivity();
+          }, 700);
+      }
+    }, 1000);
 }
 
-/* =========================================================
-   TIMER
-========================================================= */
+// =========================
+// TIMER
+// =========================
 
-function updateTimer(
-  dt
-) {
-
+function updateTimer(dt) {
   if (
     !gameRunning ||
     paused ||
@@ -3501,15 +2450,11 @@ function updateTimer(
   if (
     gameTime <= 0
   ) {
-
-    gameTime =
-      0;
+    gameTime = 0;
 
     updateTimerDisplay();
 
-    endMatch(
-      false
-    );
+    endMatch(false);
 
     return;
   }
@@ -3518,31 +2463,27 @@ function updateTimer(
 }
 
 function updateTimerDisplay() {
-
-  const minutes =
+  const m =
     Math.floor(
       gameTime / 60
     );
 
-  const seconds =
+  const s =
     Math.floor(
       gameTime % 60
     );
 
   setText(
     timerEl,
-    `${minutes}:${String(seconds).padStart(2,"0")}`
+    `${m}:${String(s).padStart(2, "0")}`
   );
 }
 
-/* =========================================================
-   FIN DU MATCH
-========================================================= */
+// =========================
+// END MATCH
+// =========================
 
-function endMatch(
-  conceded = false
-) {
-
+function endMatch(conceded = false) {
   if (
     !gameRunning &&
     !conceded
@@ -3550,14 +2491,11 @@ function endMatch(
     return;
   }
 
-  gameRunning =
-    false;
+  gameRunning = false;
+  paused = false;
+  goalActive = true;
 
-  paused =
-    false;
-
-  goalActive =
-    true;
+  updateMobilePadInteractivity();
 
   clearKeys();
 
@@ -3597,41 +2535,52 @@ function endMatch(
     "hidden"
   );
 
-  if (
-    conceded
-  ) {
-
+  if (conceded) {
     setText(
       winnerDisplay,
       "ORANGE WINS"
     );
 
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#ff8a20";
+    }
   } else if (
     blueScore >
     orangeScore
   ) {
-
     setText(
       winnerDisplay,
       "BLUE WINS"
     );
 
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#43cfff";
+    }
   } else if (
     orangeScore >
     blueScore
   ) {
-
     setText(
       winnerDisplay,
       "ORANGE WINS"
     );
 
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#ff8a20";
+    }
   } else {
-
     setText(
       winnerDisplay,
       "DRAW"
     );
+
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#fff";
+    }
   }
 
   setText(
@@ -3649,12 +2598,11 @@ function endMatch(
   );
 }
 
-/* =========================================================
-   DÉBUT MATCH
-========================================================= */
+// =========================
+// START MATCH
+// =========================
 
 function startMatch() {
-
   clearInterval(
     countdownTimer
   );
@@ -3675,43 +2623,30 @@ function startMatch() {
 
   resetPoints();
 
-  boostParticles.length =
-    0;
+  boostParticles.length = 0;
+  goalParticles.length = 0;
 
-  goalParticles.length =
-    0;
+  goalFlash = 0;
 
-  goalFlash =
-    0;
+  pinchCooldown = 0;
 
   for (
     const p of boostPads
   ) {
-
-    p.cooldown =
-      0;
-
-    p.flash =
-      0;
+    p.cooldown = 0;
+    p.flash = 0;
   }
 
-  blueScore =
-    0;
+  blueScore = 0;
+  orangeScore = 0;
 
-  orangeScore =
-    0;
+  gameTime = 120;
 
-  gameTime =
-    120;
+  paused = false;
+  gameRunning = true;
+  goalActive = true;
 
-  paused =
-    false;
-
-  gameRunning =
-    true;
-
-  goalActive =
-    true;
+  updateMobilePadInteractivity();
 
   setText(
     blueScoreEl,
@@ -3756,32 +2691,23 @@ function startMatch() {
   );
 
   introTimer =
-    setTimeout(
-      () => {
+    setTimeout(() => {
+      if (!gameRunning)
+        return;
 
-        if (
-          !gameRunning
-        ) {
-          return;
-        }
+      matchIntro?.classList.add(
+        "hidden"
+      );
 
-        matchIntro?.classList.add(
-          "hidden"
-        );
-
-        startCountdown();
-
-      },
-      900
-    );
+      startCountdown();
+    }, 900);
 }
 
-/* =========================================================
-   MENU PRINCIPAL
-========================================================= */
+// =========================
+// MAIN MENU
+// =========================
 
 function showMainMenu() {
-
   clearInterval(
     countdownTimer
   );
@@ -3800,14 +2726,11 @@ function showMainMenu() {
 
   clearKeys();
 
-  gameRunning =
-    false;
+  gameRunning = false;
+  paused = false;
+  goalActive = false;
 
-  paused =
-    false;
-
-  goalActive =
-    false;
+  updateMobilePadInteractivity();
 
   resetPoints();
 
@@ -3848,12 +2771,11 @@ function showMainMenu() {
   );
 }
 
-/* =========================================================
-   PAUSE
-========================================================= */
+// =========================
+// PAUSE
+// =========================
 
 function togglePause() {
-
   if (
     !gameRunning ||
     goalActive
@@ -3861,10 +2783,11 @@ function togglePause() {
     return;
   }
 
-  paused =
-    !paused;
+  paused = !paused;
 
   clearKeys();
+
+  updateMobilePadInteractivity();
 
   pauseMenu?.classList.toggle(
     "hidden",
@@ -3872,222 +2795,90 @@ function togglePause() {
   );
 }
 
-$("resumeButton")
-  ?.addEventListener(
-    "click",
-    () => {
+$("resumeButton")?.addEventListener(
+  "click",
+  () => {
+    if (!gameRunning)
+      return;
 
-      if (
-        !gameRunning
-      ) {
-        return;
-      }
+    paused = false;
 
-      paused =
-        false;
+    clearKeys();
 
-      clearKeys();
+    updateMobilePadInteractivity();
 
-      pauseMenu?.classList.add(
-        "hidden"
-      );
-    }
-  );
-
-/* =========================================================
-   ABANDONNER
-========================================================= */
-
-$("concedeButton")
-  ?.addEventListener(
-    "click",
-    () => {
-
-      if (
-        !gameRunning
-      ) {
-        return;
-      }
-
-      concedeConfirm?.classList.remove(
-        "hidden"
-      );
-    }
-  );
-
-$("cancelConcedeButton")
-  ?.addEventListener(
-    "click",
-    () => {
-
-      concedeConfirm?.classList.add(
-        "hidden"
-      );
-    }
-  );
-
-$("confirmConcedeButton")
-  ?.addEventListener(
-    "click",
-    () => {
-
-      concedeConfirm?.classList.add(
-        "hidden"
-      );
-
-      endMatch(
-        true
-      );
-    }
-  );
-
-$("pauseMainMenuButton")
-  ?.addEventListener(
-    "click",
-    showMainMenu
-  );
-
-/* =========================================================
-   BOUTONS MENU
-========================================================= */
-
-$("playButton")
-  ?.addEventListener(
-    "click",
-    startMatch
-  );
-
-playAgainButton
-  ?.addEventListener(
-    "click",
-    startMatch
-  );
-
-mainMenuButton
-  ?.addEventListener(
-    "click",
-    showMainMenu
-  );
-
-$("restartButton")
-  ?.addEventListener(
-    "click",
-    startMatch
-  );
-
-/* =========================================================
-   POINTS
-========================================================= */
-
-function setText(
-  el,
-  value
-) {
-
-  if (el) {
-    el.textContent =
-      value;
-  }
-}
-
-function updatePoints() {
-
-  setText(
-    playerPointsEl,
-    playerPoints
-  );
-}
-
-function awardPoints(
-  amount,
-  reason
-) {
-
-  playerPoints +=
-    amount;
-
-  updatePoints();
-
-  if (
-    pointsNotification
-  ) {
-
-    clearTimeout(
-      pointsTimer
-    );
-
-    pointsNotification
-      .textContent =
-      `+${amount} ${reason}`;
-
-    pointsNotification
-      .classList.remove(
-        "show"
-      );
-
-    void
-      pointsNotification
-        .offsetWidth;
-
-    pointsNotification
-      .classList.add(
-        "show"
-      );
-
-    pointsTimer =
-      setTimeout(
-        () =>
-          pointsNotification
-            .classList.remove(
-              "show"
-            ),
-        1100
-      );
-  }
-
-  pointsPanel?.classList.remove(
-    "earned"
-  );
-
-  if (
-    pointsPanel
-  ) {
-
-    void
-      pointsPanel
-        .offsetWidth;
-
-    pointsPanel.classList.add(
-      "earned"
+    pauseMenu?.classList.add(
+      "hidden"
     );
   }
-}
+);
 
-function resetPoints() {
+$("concedeButton")?.addEventListener(
+  "click",
+  () => {
+    if (!gameRunning)
+      return;
 
-  playerPoints =
-    0;
-
-  saveCooldown =
-    0;
-
-  saveDangerHandled =
-    false;
-
-  updatePoints();
-
-  pointsNotification
-    ?.classList.remove(
-      "show"
+    concedeConfirm?.classList.remove(
+      "hidden"
     );
-}
+  }
+);
 
-/* =========================================================
-   DESSIN TERRAIN
-========================================================= */
+$("cancelConcedeButton")?.addEventListener(
+  "click",
+  () => {
+    concedeConfirm?.classList.add(
+      "hidden"
+    );
+  }
+);
+
+$("confirmConcedeButton")?.addEventListener(
+  "click",
+  () => {
+    concedeConfirm?.classList.add(
+      "hidden"
+    );
+
+    endMatch(true);
+  }
+);
+
+$("pauseMainMenuButton")?.addEventListener(
+  "click",
+  showMainMenu
+);
+
+// =========================
+// BUTTONS
+// =========================
+
+$("playButton")?.addEventListener(
+  "click",
+  startMatch
+);
+
+playAgainButton?.addEventListener(
+  "click",
+  startMatch
+);
+
+mainMenuButton?.addEventListener(
+  "click",
+  showMainMenu
+);
+
+$("restartButton")?.addEventListener(
+  "click",
+  startMatch
+);
+
+// =========================
+// DRAW ARENA
+// =========================
 
 function drawArena() {
-
   ctx.fillStyle =
     "#06131f";
 
@@ -4101,15 +2892,13 @@ function drawArena() {
   ctx.strokeStyle =
     "rgba(80,180,255,.08)";
 
-  ctx.lineWidth =
-    1;
+  ctx.lineWidth = 1;
 
   for (
     let x = 0;
     x < W;
     x += 60
   ) {
-
     ctx.beginPath();
 
     ctx.moveTo(
@@ -4130,7 +2919,6 @@ function drawArena() {
     y < H;
     y += 60
   ) {
-
     ctx.beginPath();
 
     ctx.moveTo(
@@ -4149,8 +2937,7 @@ function drawArena() {
   ctx.strokeStyle =
     "rgba(120,220,255,.35)";
 
-  ctx.lineWidth =
-    3;
+  ctx.lineWidth = 3;
 
   ctx.strokeRect(
     field.left,
@@ -4202,13 +2989,11 @@ function drawArena() {
 
   ctx.fill();
 
-  /* CAGE BLEUE */
+  // GOAL CAGES
 
-  ctx.lineWidth =
-    5;
+  ctx.lineWidth = 5;
 
-  ctx.shadowBlur =
-    18;
+  ctx.shadowBlur = 18;
 
   ctx.strokeStyle =
     "#18cfff";
@@ -4225,8 +3010,6 @@ function drawArena() {
       goal.top
   );
 
-  /* CAGE ORANGE */
-
   ctx.strokeStyle =
     "#ff851b";
 
@@ -4241,22 +3024,19 @@ function drawArena() {
       goal.top
   );
 
-  ctx.shadowBlur =
-    0;
+  ctx.shadowBlur = 0;
 
   drawBoostPads();
 }
 
-/* =========================================================
-   BOOST PADS DESSIN
-========================================================= */
+// =========================
+// BOOST PADS DRAW
+// =========================
 
 function drawBoostPads() {
-
   for (
     const p of boostPads
   ) {
-
     const available =
       p.cooldown <= 0;
 
@@ -4265,7 +3045,7 @@ function drawBoostPads() {
       Math.sin(
         p.pulse
       ) *
-      0.08;
+        0.08;
 
     ctx.save();
 
@@ -4277,7 +3057,7 @@ function drawBoostPads() {
     ctx.globalAlpha =
       available
         ? 1
-        : .35;
+        : 0.35;
 
     ctx.shadowColor =
       p.color;
@@ -4324,8 +3104,7 @@ function drawBoostPads() {
     ctx.strokeStyle =
       "#fff";
 
-    ctx.lineWidth =
-      2;
+    ctx.lineWidth = 2;
 
     ctx.beginPath();
 
@@ -4339,18 +3118,14 @@ function drawBoostPads() {
 
     ctx.stroke();
 
-    if (
-      p.flash > 0
-    ) {
-
+    if (p.flash > 0) {
       ctx.globalAlpha =
         p.flash;
 
       ctx.strokeStyle =
         "#fff";
 
-      ctx.lineWidth =
-        4;
+      ctx.lineWidth = 4;
 
       ctx.beginPath();
 
@@ -4358,11 +3133,8 @@ function drawBoostPads() {
         0,
         0,
         32 +
-          (
-            1 -
-            p.flash
-          ) *
-          18,
+          (1 - p.flash) *
+            18,
         0,
         Math.PI * 2
       );
@@ -4378,18 +3150,14 @@ function drawBoostPads() {
   );
 }
 
-/* =========================================================
-   PARTICULES
-========================================================= */
+// =========================
+// PARTICLES DRAW
+// =========================
 
-function drawParticles(
-  list
-) {
-
+function drawParticles(list) {
   for (
     const p of list
   ) {
-
     ctx.save();
 
     ctx.globalAlpha =
@@ -4407,8 +3175,7 @@ function drawParticles(
     ctx.shadowColor =
       p.color;
 
-    ctx.shadowBlur =
-      12;
+    ctx.shadowBlur = 12;
 
     ctx.beginPath();
 
@@ -4427,7 +3194,6 @@ function drawParticles(
 }
 
 function drawGoalEffects() {
-
   drawParticles(
     goalParticles
   );
@@ -4435,12 +3201,11 @@ function drawGoalEffects() {
   if (
     goalFlash > 0
   ) {
-
     ctx.save();
 
     ctx.globalAlpha =
       goalFlash *
-      .12;
+      0.12;
 
     ctx.fillStyle =
       "#fff";
@@ -4456,16 +3221,12 @@ function drawGoalEffects() {
   }
 }
 
-/* =========================================================
-   HUD
-========================================================= */
+// =========================
+// HUD
+// =========================
 
 function updateHUD() {
-
-  if (
-    boostFill
-  ) {
-
+  if (boostFill) {
     boostFill.style.width =
       `${player.boost}%`;
   }
@@ -4477,57 +3238,60 @@ function updateHUD() {
     )
   );
 
-  /*
-    Vitesse voiture
-  */
-
-  const carSpeed =
+  const s =
     Math.abs(
       player.speed
     );
 
-  const carKmh =
+  const kmh =
     player.boosting
-
       ? Math.round(
           Math.min(
             83,
-            carSpeed *
+            s *
               (83 / 11.7)
           )
         )
-
       : Math.round(
           Math.min(
             51,
-            carSpeed *
+            s *
               (51 / 7.2)
           )
         );
 
   setText(
     speedNumber,
-    carKmh
+    kmh
   );
 
-  /*
-    Vitesse balle
-  */
+  // BALL SPEED
+  // 9 internal = 216 KM/H
 
-  if (
-    ballSpeedNumber
-  ) {
-
-    setText(
-      ballSpeedNumber,
-      `${ball.getSpeedKmh()} KM/H`
+  const ballSpeed =
+    Math.hypot(
+      ball.vx,
+      ball.vy
     );
-  }
+
+  const ballKmh =
+    Math.round(
+      Math.min(
+        216,
+        ballSpeed *
+          (216 / 9)
+      )
+    );
+
+  setText(
+    ballSpeedEl,
+    ballKmh
+  );
 }
 
-/* =========================================================
-   ROUND RECT
-========================================================= */
+// =========================
+// ROUND RECT
+// =========================
 
 function roundRect(
   x,
@@ -4536,7 +3300,6 @@ function roundRect(
   h,
   r
 ) {
-
   ctx.beginPath();
 
   ctx.moveTo(
@@ -4595,48 +3358,35 @@ function roundRect(
   ctx.closePath();
 }
 
-/* =========================================================
-   GAME LOOP
-========================================================= */
+// =========================
+// GAME LOOP
+// =========================
 
-function gameLoop(
-  now
-) {
-
+function gameLoop(now) {
   const dt =
     Math.min(
-      now -
-        lastTime,
+      now - lastTime,
       100
     );
 
-  lastTime =
-    now;
+  lastTime = now;
 
-  updateEffects(
-    dt
-  );
+  updateEffects(dt);
 
-  updateBoostPads(
-    dt
-  );
+  updateBoostPads(dt);
 
   if (
     gameRunning &&
     !paused &&
     !goalActive
   ) {
-
     player.update();
 
     bot.update();
 
     ball.update();
 
-    if (
-      !goalActive
-    ) {
-
+    if (!goalActive) {
       carBallCollision(
         player
       );
@@ -4650,9 +3400,7 @@ function gameLoop(
         bot
       );
 
-      updateTimer(
-        dt
-      );
+      updateTimer(dt);
     }
   }
 
@@ -4673,15 +3421,17 @@ function gameLoop(
   );
 }
 
-/* =========================================================
-   INITIALISATION
-========================================================= */
+// =========================
+// INITIALISATION
+// =========================
 
-updateGameName();
+renameGameBrand();
 
-createBallSpeedHUD();
+setupDeviceChoice();
 
 updateControlUI();
+
+updateMobileSettingsUI();
 
 resetPoints();
 
@@ -4696,8 +3446,6 @@ player.draw();
 bot.draw();
 
 updateHUD();
-
-createDeviceChoice();
 
 requestAnimationFrame(
   gameLoop
