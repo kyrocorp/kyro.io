@@ -1,1 +1,265 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TURBOBALL.IO</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
 
+<body>
+
+<div id="gameWrapper">
+
+  <!-- HEADER -->
+  <header id="topBar">
+    <div id="pointsPanel">
+      <span class="pointsLabel">POINTS</span>
+      <span id="playerPoints">0</span>
+      <div id="pointsNotification" class="points-notification" aria-live="polite"></div>
+    </div>
+
+    <div id="scoreboard">
+      <div class="team blue">
+        <span class="teamName">BLUE UNIT</span>
+        <span id="blueScore">0</span>
+      </div>
+
+      <div id="timerBox">
+        <span class="smallTitle">MATCH TIME</span>
+        <span id="timer">2:00</span>
+      </div>
+
+      <div class="team orange">
+        <span class="teamName">ORANGE CREW</span>
+        <span id="orangeScore">0</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- CANVAS -->
+  <div id="arenaContainer">
+    <canvas id="gameCanvas" width="1200" height="700"></canvas>
+
+    <!-- GOAL MESSAGE -->
+    <div id="goalMessage" class="hidden">
+      <div id="goalText">GOAL!</div>
+      <div id="goalScorer"></div>
+    </div>
+
+    <!-- COUNTDOWN -->
+    <div id="countdown" class="hidden">3</div>
+
+    <!-- PAUSE -->
+    <div id="pauseMenu" class="hidden">
+      <h1>PAUSED</h1>
+      <button id="resumeButton">RESUME MATCH</button>
+    </div>
+
+    <!-- END SCREEN -->
+    <div id="endScreen" class="hidden">
+      <h1 id="winnerText">BLUE UNIT WINS</h1>
+      <div id="finalScore"></div>
+      <button id="restartButton">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM HUD -->
+  <div id="bottomHud">
+
+    <div id="boostContainer">
+      <div class="hudLabel">BOOST</div>
+      <div id="boostBar">
+        <div id="boostFill"></div>
+      </div>
+      <span id="boostNumber">100</span>
+    </div>
+
+    <div id="speedContainer">
+      <div class="hudLabel">SPEED</div>
+      <span id="speedNumber">0</span>
+      <span class="kmh">KM/H</span>
+    </div>
+
+    <div id="controls">
+      <span>PILOT CONTROLS</span>
+      <b>Z</b> Forward
+      <b>S</b> Reverse
+      <b>Q</b> Left
+      <b>D</b> Right
+      <b>SPACE</b> Boost
+      <b>P</b> Pause
+    </div>
+
+  </div>
+
+</div>
+
+<!-- =========================
+     MAIN MENU
+========================= -->
+
+<div id="mainMenu" class="menu-screen">
+
+    <div class="menu-background"></div>
+
+    <div class="menu-content">
+
+        <div class="logo">
+            <div class="logo-small">WELCOME TO</div>
+            <h1>TURBO<span>BALL</span></h1>
+            <div class="logo-io">.IO</div>
+        </div>
+
+        <div class="menu-buttons">
+
+            <button id="playButton" class="main-button">
+                PLAY GAME
+            </button>
+
+            <button id="howToPlayButton" class="secondary-button">
+                HOW TO PLAY
+            </button>
+
+            <button id="settingsButton" class="secondary-button">
+                SETTINGS
+            </button>
+
+        </div>
+
+        <div class="menu-footer">
+            ORIGINAL 2D CAR FOOTBALL GAME
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================
+     HOW TO PLAY MENU
+========================= -->
+
+<div id="howToPlayMenu" class="menu-screen hidden">
+
+    <div class="panel">
+
+        <h2>HOW TO PLAY</h2>
+
+        <div class="controls-grid">
+
+            <div>
+                <b>Z</b>
+                <span>ACCELERATE</span>
+            </div>
+
+            <div>
+                <b>S</b>
+                <span>REVERSE</span>
+            </div>
+
+            <div>
+                <b>Q</b>
+                <span>TURN LEFT</span>
+            </div>
+
+            <div>
+                <b>D</b>
+                <span>TURN RIGHT</span>
+            </div>
+
+            <div>
+                <b>SPACE</b>
+                <span>BOOST</span>
+            </div>
+
+        </div>
+
+        <button id="backButton" class="secondary-button">
+            BACK
+        </button>
+
+    </div>
+
+</div>
+
+<!-- =========================
+     MATCH START SCREEN
+========================= -->
+
+<div id="matchIntro" class="menu-screen hidden">
+
+    <div class="match-intro-content">
+
+        <div class="versus">
+
+            <div class="intro-team blue-intro">
+                BLUE
+            </div>
+
+            <div class="vs">VS</div>
+
+            <div class="intro-team orange-intro">
+                ORANGE
+            </div>
+
+        </div>
+
+        <div class="starting-text">
+            MATCH STARTING
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================
+     MATCH RESULT SCREEN
+========================= -->
+
+<div id="resultScreen" class="menu-screen hidden">
+
+    <div class="result-panel">
+
+        <div class="result-title">
+            MATCH COMPLETE
+        </div>
+
+        <div id="winnerDisplay">
+            BLUE WINS
+        </div>
+
+        <div class="final-score-display">
+
+            <div class="result-blue">
+                <span>BLUE</span>
+                <b id="finalBlueScore">0</b>
+            </div>
+
+            <div class="result-divider">-</div>
+
+            <div class="result-orange">
+                <b id="finalOrangeScore">0</b>
+                <span>ORANGE</span>
+            </div>
+
+        </div>
+
+        <div class="result-buttons">
+
+            <button id="playAgainButton" class="main-button">
+                PLAY AGAIN
+            </button>
+
+            <button id="mainMenuButton" class="secondary-button">
+                MAIN MENU
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
