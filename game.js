@@ -1,38 +1,212 @@
+/* =========================================================
+   ROCKET LEAGUE.IO
+   Jeu 2D voiture + football
+   PC + MOBILE
+========================================================= */
+
 const canvas = document.getElementById("gameCanvas");
-if (!canvas) throw new Error("gameCanvas introuvable");
+
+if (!canvas) {
+  throw new Error("gameCanvas introuvable");
+}
 
 const ctx = canvas.getContext("2d");
+
 const W = canvas.width;
 const H = canvas.height;
 
 const $ = id => document.getElementById(id);
 
+/* =========================================================
+   NOM DU JEU
+========================================================= */
+
+document.title = "ROCKET LEAGUE.IO";
+
+function updateGameName() {
+  document.title = "ROCKET LEAGUE.IO";
+
+  document.querySelectorAll("*").forEach(el => {
+    if (
+      el.children.length === 0 &&
+      typeof el.textContent === "string"
+    ) {
+      el.textContent =
+        el.textContent
+          .replaceAll("TURBOBALL.IO", "ROCKET LEAGUE.IO")
+          .replaceAll("TURBOBALL", "ROCKET LEAGUE");
+    }
+  });
+}
+
+/* =========================================================
+   ELEMENTS HTML
+========================================================= */
+
 const blueScoreEl = $("blueScore");
 const orangeScoreEl = $("orangeScore");
 const timerEl = $("timer");
+
 const goalMessage = $("goalMessage");
 const goalText = $("goalText");
 const goalScorer = $("goalScorer");
 const countdownEl = $("countdown");
+
 const pauseMenu = $("pauseMenu");
 const resultScreen = $("resultScreen");
+
 const winnerDisplay = $("winnerDisplay");
 const finalBlueScore = $("finalBlueScore");
 const finalOrangeScore = $("finalOrangeScore");
+
 const playAgainButton = $("playAgainButton");
 const mainMenuButton = $("mainMenuButton");
+
 const mainMenu = $("mainMenu");
 const howToPlayMenu = $("howToPlayMenu");
 const matchIntro = $("matchIntro");
+
 const pointsPanel = $("pointsPanel");
 const playerPointsEl = $("playerPoints");
 const pointsNotification = $("pointsNotification");
+
 const boostFill = $("boostFill");
 const boostNumber = $("boostNumber");
 const speedNumber = $("speedNumber");
 
 const settingsMenu = $("settingsMenu");
 const concedeConfirm = $("concedeConfirm");
+
+/* =========================================================
+   COMPTEUR VITESSE BALLE
+========================================================= */
+
+let ballSpeedPanel = null;
+let ballSpeedNumber = null;
+
+function createBallSpeedHUD() {
+  if (document.getElementById("ballSpeedHUD")) {
+    ballSpeedPanel =
+      document.getElementById("ballSpeedHUD");
+
+    ballSpeedNumber =
+      document.getElementById("ballSpeedNumber");
+
+    return;
+  }
+
+  const style = document.createElement("style");
+
+  style.id = "rocket-ball-speed-style";
+
+  style.textContent = `
+    #ballSpeedHUD {
+      position: fixed;
+      top: 18px;
+      right: 20px;
+      z-index: 3000;
+
+      min-width: 145px;
+
+      padding: 10px 16px;
+
+      border-radius: 12px;
+
+      background:
+        linear-gradient(
+          135deg,
+          rgba(5,15,25,.92),
+          rgba(12,30,45,.88)
+        );
+
+      border: 1px solid rgba(130,220,255,.5);
+
+      box-shadow:
+        0 0 18px rgba(30,190,255,.15),
+        inset 0 0 12px rgba(30,190,255,.04);
+
+      color: white;
+
+      font-family: Arial,sans-serif;
+
+      text-align: center;
+
+      pointer-events: none;
+    }
+
+    #ballSpeedTitle {
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: #9fc5d8;
+      font-weight: 800;
+    }
+
+    #ballSpeedNumber {
+      margin-top: 2px;
+
+      font-size: 24px;
+      font-weight: 900;
+
+      letter-spacing: 1px;
+
+      text-shadow:
+        0 0 12px rgba(100,220,255,.55);
+    }
+
+    #ballSpeedHUD.pinch {
+      transform: scale(1.08);
+
+      border-color: rgba(255,255,255,.9);
+
+      box-shadow:
+        0 0 28px rgba(255,255,255,.35);
+    }
+
+    @media(max-width:700px) {
+      #ballSpeedHUD {
+        top: 12px;
+        right: 12px;
+        min-width: 115px;
+        padding: 7px 10px;
+      }
+
+      #ballSpeedNumber {
+        font-size: 19px;
+      }
+
+      #ballSpeedTitle {
+        font-size: 8px;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+
+  ballSpeedPanel =
+    document.createElement("div");
+
+  ballSpeedPanel.id =
+    "ballSpeedHUD";
+
+  ballSpeedPanel.innerHTML = `
+    <div id="ballSpeedTitle">
+      BALL SPEED
+    </div>
+
+    <div id="ballSpeedNumber">
+      0 KM/H
+    </div>
+  `;
+
+  document.body.appendChild(
+    ballSpeedPanel
+  );
+
+  ballSpeedNumber =
+    document.getElementById(
+      "ballSpeedNumber"
+    );
+}
 
 /* =========================================================
    CONTROLES PC
@@ -46,18 +220,30 @@ const defaults = {
   boost: "space"
 };
 
-let controls = { ...defaults };
+let controls = {
+  ...defaults
+};
 
 try {
-  const saved = JSON.parse(
-    localStorage.getItem("turboball-controls") || "null"
-  );
+  const saved =
+    JSON.parse(
+      localStorage.getItem(
+        "rocket-league-io-controls"
+      ) || "null"
+    );
 
   if (
     saved &&
-    Object.keys(defaults).every(k => typeof saved[k] === "string")
+    Object.keys(defaults).every(
+      k =>
+        typeof saved[k] ===
+        "string"
+    )
   ) {
-    controls = { ...defaults, ...saved };
+    controls = {
+      ...defaults,
+      ...saved
+    };
   }
 } catch {}
 
@@ -77,13 +263,15 @@ const howButtons = {
   boost: $("howSpaceKey")
 };
 
+const keys =
+  Object.create(null);
+
 let waitingForAction = null;
+
 let settingsReturn = "main";
 
-const keys = Object.create(null);
-
 /* =========================================================
-   SYSTÈME PC / MOBILE
+   MODE PC / MOBILE
 ========================================================= */
 
 let deviceMode = null;
@@ -99,34 +287,292 @@ const mobileInput = {
 let mobileJoystick = null;
 let mobileJoystickPointer = null;
 
-function isMobileMode() {
-  return deviceMode === "mobile";
+/* =========================================================
+   CHOIX APPAREIL
+========================================================= */
+
+function createDeviceChoice() {
+  if (
+    document.getElementById(
+      "deviceChoice"
+    )
+  ) {
+    return;
+  }
+
+  mainMenu?.classList.add(
+    "hidden"
+  );
+
+  const style =
+    document.createElement(
+      "style"
+    );
+
+  style.id =
+    "device-choice-style";
+
+  style.textContent = `
+    #deviceChoice {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      padding: 20px;
+
+      box-sizing: border-box;
+
+      background:
+        radial-gradient(
+          circle at center,
+          rgba(10,35,60,.98),
+          rgba(2,7,14,1)
+        );
+
+      color: white;
+
+      font-family: Arial,sans-serif;
+    }
+
+    .device-box {
+      width: min(700px,94vw);
+
+      padding: 35px 25px;
+
+      border-radius: 24px;
+
+      background:
+        rgba(4,15,27,.97);
+
+      border:
+        1px solid rgba(80,210,255,.5);
+
+      box-shadow:
+        0 0 45px rgba(0,180,255,.18);
+
+      text-align: center;
+    }
+
+    .device-title {
+      font-size:
+        clamp(30px,7vw,55px);
+
+      font-weight: 900;
+
+      letter-spacing: 4px;
+
+      text-shadow:
+        0 0 22px #19cfff;
+    }
+
+    .device-subtitle {
+      margin:
+        12px 0 28px;
+
+      color: #aac3d3;
+
+      font-size:
+        clamp(14px,3vw,19px);
+
+      letter-spacing: 2px;
+    }
+
+    .device-buttons {
+      display: flex;
+
+      justify-content: center;
+
+      gap: 18px;
+
+      flex-wrap: wrap;
+    }
+
+    .device-button {
+      width:
+        min(280px,80vw);
+
+      min-height: 150px;
+
+      border-radius: 18px;
+
+      border:
+        1px solid
+        rgba(80,210,255,.5);
+
+      background:
+        linear-gradient(
+          145deg,
+          #0b2437,
+          #07131f
+        );
+
+      color: white;
+
+      cursor: pointer;
+
+      font-size: 42px;
+
+      transition: .18s;
+
+      touch-action: manipulation;
+    }
+
+    .device-button span {
+      display: block;
+
+      font-size: 22px;
+
+      font-weight: 900;
+
+      letter-spacing: 2px;
+
+      margin-top: 7px;
+    }
+
+    .device-button small {
+      display: block;
+
+      margin-top: 9px;
+
+      font-size: 11px;
+
+      color: #8eaabd;
+    }
+
+    .device-button:hover {
+      transform:
+        translateY(-3px);
+
+      box-shadow:
+        0 0 28px
+        rgba(40,210,255,.25);
+
+      border-color:
+        #54dcff;
+    }
+
+    .device-button:active {
+      transform:
+        scale(.97);
+    }
+  `;
+
+  document.head.appendChild(
+    style
+  );
+
+  const wrap =
+    document.createElement(
+      "div"
+    );
+
+  wrap.id =
+    "deviceChoice";
+
+  wrap.innerHTML = `
+    <div class="device-box">
+
+      <div class="device-title">
+        ROCKET LEAGUE.IO
+      </div>
+
+      <div class="device-subtitle">
+        SUR QUEL APPAREIL JOUEZ-VOUS ?
+      </div>
+
+      <div class="device-buttons">
+
+        <button
+          id="choosePC"
+          class="device-button"
+        >
+          🖥️
+          <span>PC</span>
+          <small>
+            Z / S / Q / D + ESPACE
+          </small>
+        </button>
+
+        <button
+          id="chooseMobile"
+          class="device-button"
+        >
+          📱
+          <span>MOBILE</span>
+          <small>
+            JOYSTICK + BOOST
+          </small>
+        </button>
+
+      </div>
+
+    </div>
+  `;
+
+  document.body.appendChild(
+    wrap
+  );
+
+  document
+    .getElementById("choosePC")
+    .addEventListener(
+      "click",
+      () => {
+        setDeviceMode("pc");
+
+        wrap.remove();
+        style.remove();
+
+        mainMenu?.classList.remove(
+          "hidden"
+        );
+      }
+    );
+
+  document
+    .getElementById("chooseMobile")
+    .addEventListener(
+      "click",
+      () => {
+        setDeviceMode("mobile");
+
+        wrap.remove();
+        style.remove();
+
+        mainMenu?.classList.remove(
+          "hidden"
+        );
+      }
+    );
 }
 
+/* =========================================================
+   MODE APPAREIL
+========================================================= */
+
 function setDeviceMode(mode) {
-  deviceMode = mode === "mobile" ? "mobile" : "pc";
+  deviceMode =
+    mode === "mobile"
+      ? "mobile"
+      : "pc";
 
   try {
-    localStorage.setItem("turboball-device-mode", deviceMode);
+    localStorage.setItem(
+      "rocket-league-io-device",
+      deviceMode
+    );
   } catch {}
 
-  if (deviceMode === "mobile") {
+  if (
+    deviceMode === "mobile"
+  ) {
     createMobileControls();
   } else {
     removeMobileControls();
-  }
-
-  updateDeviceLabels();
-}
-
-function updateDeviceLabels() {
-  const modeEl = document.getElementById("deviceModeLabel");
-
-  if (modeEl) {
-    modeEl.textContent =
-      deviceMode === "mobile"
-        ? "📱 MODE MOBILE"
-        : "🖥️ MODE PC";
   }
 }
 
@@ -137,193 +583,7 @@ function clearMobileInput() {
   mobileInput.right = false;
   mobileInput.boost = false;
 
-  if (mobileJoystick) {
-    mobileJoystick.reset();
-  }
-}
-
-/* =========================================================
-   MENU DE CHOIX DE L'APPAREIL
-========================================================= */
-
-function createDeviceChoice() {
-  if (document.getElementById("deviceChoice")) return;
-
-  if (mainMenu) {
-    mainMenu.classList.add("hidden");
-  }
-
-  const wrap = document.createElement("div");
-
-  wrap.id = "deviceChoice";
-
-  wrap.innerHTML = `
-    <div class="tb-device-box">
-
-      <div class="tb-device-title">
-        TURBOBALL.IO
-      </div>
-
-      <div class="tb-device-sub">
-        SUR QUEL APPAREIL JOUEZ-VOUS ?
-      </div>
-
-      <div class="tb-device-buttons">
-
-        <button id="choosePC" class="tb-device-btn">
-          🖥️
-          <span>PC</span>
-          <small>Z / S / Q / D + ESPACE</small>
-        </button>
-
-        <button id="chooseMobile" class="tb-device-btn">
-          📱
-          <span>MOBILE</span>
-          <small>JOYSTICK + BOOST</small>
-        </button>
-
-      </div>
-
-    </div>
-  `;
-
-  document.body.appendChild(wrap);
-
-  const style = document.createElement("style");
-
-  style.id = "tb-device-style";
-
-  style.textContent = `
-    #deviceChoice {
-      position: fixed;
-      inset: 0;
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background:
-        radial-gradient(
-          circle at center,
-          rgba(10,35,60,.97),
-          rgba(2,7,14,.99)
-        );
-      font-family: Arial, sans-serif;
-      color: #fff;
-      padding: 20px;
-      box-sizing: border-box;
-    }
-
-    .tb-device-box {
-      width: min(680px,94vw);
-      padding: 36px 28px;
-      border: 1px solid rgba(80,210,255,.45);
-      border-radius: 24px;
-      background: rgba(4,15,27,.96);
-      box-shadow:
-        0 0 45px rgba(0,180,255,.18),
-        inset 0 0 30px rgba(0,180,255,.04);
-      text-align: center;
-    }
-
-    .tb-device-title {
-      font-size: clamp(28px,7vw,54px);
-      font-weight: 900;
-      letter-spacing: 5px;
-      text-shadow: 0 0 20px #19cfff;
-    }
-
-    .tb-device-sub {
-      margin: 10px 0 28px;
-      font-size: clamp(14px,3vw,20px);
-      letter-spacing: 2px;
-      color: #a9c6d9;
-    }
-
-    .tb-device-buttons {
-      display: flex;
-      gap: 18px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    .tb-device-btn {
-      width: min(270px,80vw);
-      min-height: 150px;
-      border: 1px solid rgba(80,210,255,.55);
-      border-radius: 18px;
-      background: linear-gradient(145deg,#0b2437,#07131f);
-      color: #fff;
-      cursor: pointer;
-      font-size: 42px;
-      transition: .18s;
-      touch-action: manipulation;
-    }
-
-    .tb-device-btn span {
-      display: block;
-      font-size: 22px;
-      font-weight: 900;
-      letter-spacing: 2px;
-      margin-top: 7px;
-    }
-
-    .tb-device-btn small {
-      display: block;
-      font-size: 11px;
-      color: #8eaabd;
-      margin-top: 9px;
-      letter-spacing: 1px;
-    }
-
-    .tb-device-btn:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 0 28px rgba(40,210,255,.25);
-      border-color: #54dcff;
-    }
-
-    .tb-device-btn:active {
-      transform: scale(.97);
-    }
-
-    @media(max-width:600px) {
-      .tb-device-box {
-        padding: 28px 16px;
-      }
-
-      .tb-device-buttons {
-        gap: 12px;
-      }
-
-      .tb-device-btn {
-        min-height: 125px;
-        font-size: 34px;
-      }
-    }
-  `;
-
-  document.head.appendChild(style);
-
-  document.getElementById("choosePC").addEventListener("click", () => {
-    setDeviceMode("pc");
-
-    wrap.remove();
-    style.remove();
-
-    if (mainMenu) {
-      mainMenu.classList.remove("hidden");
-    }
-  });
-
-  document.getElementById("chooseMobile").addEventListener("click", () => {
-    setDeviceMode("mobile");
-
-    wrap.remove();
-    style.remove();
-
-    if (mainMenu) {
-      mainMenu.classList.remove("hidden");
-    }
-  });
+  mobileJoystick?.reset();
 }
 
 /* =========================================================
@@ -333,213 +593,385 @@ function createDeviceChoice() {
 function createMobileControls() {
   removeMobileControls();
 
-  const layer = document.createElement("div");
+  const style =
+    document.createElement(
+      "style"
+    );
 
-  layer.id = "mobileControls";
+  style.id =
+    "mobile-controls-style";
+
+  style.textContent = `
+    #mobileControls {
+      position: fixed;
+      inset: 0;
+
+      z-index: 5000;
+
+      pointer-events: none;
+
+      touch-action: none;
+    }
+
+    .touch-control {
+      position: absolute;
+
+      pointer-events: auto;
+
+      user-select: none;
+
+      -webkit-user-select: none;
+
+      touch-action: none;
+    }
+
+    #mobilePauseButton {
+      top: 20px;
+      left: 20px;
+
+      width: 55px;
+      height: 55px;
+
+      border-radius: 50%;
+
+      display: flex;
+
+      align-items: center;
+      justify-content: center;
+
+      background:
+        rgba(4,17,29,.85);
+
+      border:
+        2px solid
+        rgba(120,220,255,.7);
+
+      color: white;
+
+      font-size: 20px;
+
+      font-weight: 900;
+    }
+
+    #mobileBoostButton {
+      right: 205px;
+      bottom: 38px;
+
+      width: 95px;
+      height: 95px;
+
+      border-radius: 50%;
+
+      display: flex;
+
+      align-items: center;
+      justify-content: center;
+
+      background:
+        rgba(255,125,20,.2);
+
+      border:
+        3px solid
+        rgba(255,150,50,.9);
+
+      color: white;
+
+      font-size: 13px;
+
+      font-weight: 900;
+
+      letter-spacing: 1px;
+    }
+
+    #mobileBoostButton.active {
+      transform:
+        scale(.93);
+
+      background:
+        rgba(255,130,20,.5);
+    }
+
+    #mobileJoystick {
+      right: 22px;
+      bottom: 22px;
+
+      width: 150px;
+      height: 150px;
+
+      border-radius: 50%;
+
+      background:
+        rgba(30,80,110,.28);
+
+      border:
+        2px solid
+        rgba(120,220,255,.55);
+
+      box-shadow:
+        inset 0 0 25px
+        rgba(30,200,255,.1),
+
+        0 0 25px
+        rgba(20,180,255,.12);
+    }
+
+    #mobileJoystickKnob {
+      position: absolute;
+
+      left: 50%;
+      top: 50%;
+
+      width: 64px;
+      height: 64px;
+
+      margin:
+        -32px;
+
+      border-radius: 50%;
+
+      background:
+        rgba(80,210,255,.65);
+
+      border:
+        2px solid
+        rgba(255,255,255,.8);
+
+      box-shadow:
+        0 0 22px
+        rgba(30,200,255,.45);
+
+      transform:
+        translate(0,0);
+    }
+
+    @media(max-width:700px)
+    and (orientation:portrait) {
+
+      #mobileControls:after {
+        content:
+          "Tournez votre téléphone en paysage ↻";
+
+        position: fixed;
+
+        top: 5px;
+        left: 50%;
+
+        transform:
+          translateX(-50%);
+
+        font:
+          700 11px Arial;
+
+        color: #9fc4d7;
+
+        background:
+          rgba(0,0,0,.4);
+
+        padding:
+          6px 10px;
+
+        border-radius: 10px;
+      }
+    }
+
+    @media(max-width:500px) {
+
+      #mobileJoystick {
+        width: 125px;
+        height: 125px;
+
+        right: 12px;
+        bottom: 12px;
+      }
+
+      #mobileJoystickKnob {
+        width: 54px;
+        height: 54px;
+
+        margin: -27px;
+      }
+
+      #mobileBoostButton {
+        right: 150px;
+        bottom: 25px;
+
+        width: 82px;
+        height: 82px;
+      }
+    }
+  `;
+
+  document.head.appendChild(
+    style
+  );
+
+  const layer =
+    document.createElement(
+      "div"
+    );
+
+  layer.id =
+    "mobileControls";
 
   layer.innerHTML = `
     <div
       id="mobilePauseButton"
-      class="tb-touch-btn tb-pause-touch"
+      class="touch-control"
     >
       Ⅱ
     </div>
 
     <div
       id="mobileBoostButton"
-      class="tb-touch-btn tb-boost-touch"
+      class="touch-control"
     >
       BOOST
     </div>
 
     <div
       id="mobileJoystick"
-      class="tb-joystick"
+      class="touch-control"
     >
       <div
         id="mobileJoystickKnob"
-        class="tb-joystick-knob"
       ></div>
     </div>
   `;
 
-  document.body.appendChild(layer);
+  document.body.appendChild(
+    layer
+  );
 
-  const style = document.createElement("style");
+  const joy =
+    document.getElementById(
+      "mobileJoystick"
+    );
 
-  style.id = "tb-mobile-style";
-
-  style.textContent = `
-    #mobileControls {
-      position: fixed;
-      inset: 0;
-      z-index: 5000;
-      pointer-events: none;
-      touch-action: none;
-      display: block;
-    }
-
-    .tb-touch-btn,
-    .tb-joystick {
-      position: absolute;
-      pointer-events: auto;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: none;
-    }
-
-    .tb-pause-touch {
-      right: 22px;
-      top: 20px;
-      width: 54px;
-      height: 54px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(4,17,29,.8);
-      border: 2px solid rgba(120,220,255,.7);
-      color: #fff;
-      font-weight: 900;
-      font-size: 21px;
-      box-shadow: 0 0 18px rgba(40,200,255,.2);
-    }
-
-    .tb-boost-touch {
-      right: 190px;
-      bottom: 48px;
-      width: 94px;
-      height: 94px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(255,125,20,.2);
-      border: 3px solid rgba(255,150,50,.9);
-      color: #fff;
-      font-weight: 900;
-      font-size: 13px;
-      letter-spacing: 1px;
-      box-shadow: 0 0 24px rgba(255,100,20,.25);
-    }
-
-    .tb-boost-touch.active {
-      transform: scale(.94);
-      background: rgba(255,130,20,.45);
-    }
-
-    .tb-joystick {
-      right: 24px;
-      bottom: 28px;
-      width: 145px;
-      height: 145px;
-      border-radius: 50%;
-      background: rgba(30,80,110,.28);
-      border: 2px solid rgba(120,220,255,.55);
-      box-shadow:
-        inset 0 0 24px rgba(30,200,255,.1),
-        0 0 25px rgba(20,180,255,.12);
-    }
-
-    .tb-joystick-knob {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 62px;
-      height: 62px;
-      margin: -31px;
-      border-radius: 50%;
-      background: rgba(80,210,255,.65);
-      border: 2px solid rgba(255,255,255,.8);
-      box-shadow: 0 0 22px rgba(30,200,255,.45);
-      transform: translate(0,0);
-    }
-
-    @media(max-width:700px) and (orientation:portrait) {
-      #mobileControls:after {
-        content: 'Tournez votre téléphone en paysage ↻';
-        position: fixed;
-        top: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        font: 700 11px Arial;
-        color: #9fc4d7;
-        background: rgba(0,0,0,.35);
-        padding: 6px 10px;
-        border-radius: 10px;
-        pointer-events: none;
-      }
-    }
-  `;
-
-  document.head.appendChild(style);
-
-  const joy = document.getElementById("mobileJoystick");
-  const knob = document.getElementById("mobileJoystickKnob");
+  const knob =
+    document.getElementById(
+      "mobileJoystickKnob"
+    );
 
   const max = 52;
 
-  const updateJoystick = (clientX, clientY) => {
-    const rect = joy.getBoundingClientRect();
+  function moveJoystick(
+    clientX,
+    clientY
+  ) {
+    const rect =
+      joy.getBoundingClientRect();
 
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
+    const cx =
+      rect.left +
+      rect.width / 2;
 
-    let dx = clientX - centerX;
-    let dy = clientY - centerY;
+    const cy =
+      rect.top +
+      rect.height / 2;
 
-    const length = Math.hypot(dx, dy);
+    let dx =
+      clientX - cx;
+
+    let dy =
+      clientY - cy;
+
+    const length =
+      Math.hypot(
+        dx,
+        dy
+      );
 
     if (length > max) {
-      dx = dx / length * max;
-      dy = dy / length * max;
+      dx =
+        dx / length * max;
+
+      dy =
+        dy / length * max;
     }
 
     knob.style.transform =
       `translate(${dx}px,${dy}px)`;
 
-    const nx = dx / max;
-    const ny = dy / max;
+    const nx =
+      dx / max;
 
-    mobileInput.left = nx < -0.22;
-    mobileInput.right = nx > 0.22;
+    const ny =
+      dy / max;
 
-    mobileInput.forward = ny < -0.22;
-    mobileInput.reverse = ny > 0.22;
-  };
+    mobileInput.left =
+      nx < -0.22;
+
+    mobileInput.right =
+      nx > 0.22;
+
+    mobileInput.forward =
+      ny < -0.22;
+
+    mobileInput.reverse =
+      ny > 0.22;
+  }
 
   mobileJoystick = {
     reset() {
-      knob.style.transform = "translate(0,0)";
+      knob.style.transform =
+        "translate(0,0)";
     }
   };
 
-  joy.addEventListener("pointerdown", e => {
-    e.preventDefault();
+  joy.addEventListener(
+    "pointerdown",
+    e => {
+      e.preventDefault();
 
-    mobileJoystickPointer = e.pointerId;
+      mobileJoystickPointer =
+        e.pointerId;
 
-    joy.setPointerCapture(e.pointerId);
+      joy.setPointerCapture(
+        e.pointerId
+      );
 
-    updateJoystick(e.clientX, e.clientY);
-  });
+      moveJoystick(
+        e.clientX,
+        e.clientY
+      );
+    }
+  );
 
-  joy.addEventListener("pointermove", e => {
-    if (e.pointerId !== mobileJoystickPointer) return;
+  joy.addEventListener(
+    "pointermove",
+    e => {
+      if (
+        e.pointerId !==
+        mobileJoystickPointer
+      ) {
+        return;
+      }
 
-    updateJoystick(e.clientX, e.clientY);
-  });
+      moveJoystick(
+        e.clientX,
+        e.clientY
+      );
+    }
+  );
 
-  const releaseJoystick = () => {
-    mobileJoystickPointer = null;
+  function releaseJoystick() {
+    mobileJoystickPointer =
+      null;
 
-    mobileInput.forward = false;
-    mobileInput.reverse = false;
-    mobileInput.left = false;
-    mobileInput.right = false;
+    mobileInput.forward =
+      false;
+
+    mobileInput.reverse =
+      false;
+
+    mobileInput.left =
+      false;
+
+    mobileInput.right =
+      false;
 
     mobileJoystick.reset();
-  };
+  }
 
   joy.addEventListener(
     "pointerup",
@@ -553,24 +985,31 @@ function createMobileControls() {
 
   /* BOOST */
 
-  const boost = document.getElementById(
-    "mobileBoostButton"
-  );
+  const boost =
+    document.getElementById(
+      "mobileBoostButton"
+    );
 
   const boostOn = e => {
     e.preventDefault();
 
-    mobileInput.boost = true;
+    mobileInput.boost =
+      true;
 
-    boost.classList.add("active");
+    boost.classList.add(
+      "active"
+    );
   };
 
   const boostOff = e => {
     e.preventDefault();
 
-    mobileInput.boost = false;
+    mobileInput.boost =
+      false;
 
-    boost.classList.remove("active");
+    boost.classList.remove(
+      "active"
+    );
   };
 
   boost.addEventListener(
@@ -596,247 +1035,380 @@ function createMobileControls() {
   /* PAUSE */
 
   document
-    .getElementById("mobilePauseButton")
-    .addEventListener("pointerdown", e => {
-      e.preventDefault();
+    .getElementById(
+      "mobilePauseButton"
+    )
+    .addEventListener(
+      "pointerdown",
+      e => {
+        e.preventDefault();
 
-      if (gameRunning && !goalActive) {
-        togglePause();
+        if (
+          gameRunning &&
+          !goalActive
+        ) {
+          togglePause();
+        }
       }
-    });
+    );
 }
 
 function removeMobileControls() {
-  document.getElementById("mobileControls")?.remove();
-  document.getElementById("tb-mobile-style")?.remove();
+  document
+    .getElementById(
+      "mobileControls"
+    )
+    ?.remove();
+
+  document
+    .getElementById(
+      "mobile-controls-style"
+    )
+    ?.remove();
 
   mobileJoystick = null;
 
   clearMobileInput();
 }
 
-function setupDeviceChoice() {
-  createDeviceChoice();
-}
-
 /* =========================================================
-   TOUCH / CLAVIER
+   TOUCHES PC
 ========================================================= */
 
-function keyName(key) {
-  if (key === " ") return "SPACE";
-  if (key === "space") return "SPACE";
-  if (key.length === 1) return key.toUpperCase();
+function normalizedKey(e) {
+  if (e.code === "Space") {
+    return "space";
+  }
 
-  return key.toUpperCase();
+  return e.key.toLowerCase();
+}
+
+function keyName(key) {
+  if (
+    key === " " ||
+    key === "space"
+  ) {
+    return "SPACE";
+  }
+
+  return key.length === 1
+    ? key.toUpperCase()
+    : key.toUpperCase();
 }
 
 function saveControls() {
   try {
     localStorage.setItem(
-      "turboball-controls",
-      JSON.stringify(controls)
+      "rocket-league-io-controls",
+      JSON.stringify(
+        controls
+      )
     );
   } catch {}
 }
 
 function updateControlUI() {
-  for (const action of Object.keys(keyButtons)) {
-    if (keyButtons[action]) {
-      keyButtons[action].textContent =
-        keyName(controls[action]);
+  for (
+    const action of
+    Object.keys(keyButtons)
+  ) {
+    if (
+      keyButtons[action]
+    ) {
+      keyButtons[action]
+        .textContent =
+        keyName(
+          controls[action]
+        );
     }
 
-    if (howButtons[action]) {
-      howButtons[action].textContent =
-        keyName(controls[action]);
+    if (
+      howButtons[action]
+    ) {
+      howButtons[action]
+        .textContent =
+        keyName(
+          controls[action]
+        );
     }
   }
 }
 
-function normalizedKey(e) {
-  if (e.code === "Space") return "space";
-
-  return e.key.toLowerCase();
-}
-
-function controlPressed(action) {
-  if (isMobileMode()) {
-    return !!mobileInput[action];
+function controlPressed(
+  action
+) {
+  if (
+    deviceMode === "mobile"
+  ) {
+    return !!mobileInput[
+      action
+    ];
   }
 
-  return !!keys[controls[action]];
+  return !!keys[
+    controls[action]
+  ];
 }
 
 function clearKeys() {
-  for (const k in keys) {
-    keys[k] = false;
+  for (
+    const key in keys
+  ) {
+    keys[key] = false;
   }
 
   clearMobileInput();
 }
 
-document.addEventListener("keydown", e => {
-  if (waitingForAction) {
-    e.preventDefault();
-
-    if (e.key === "Escape") {
-      waitingForAction.textContent =
-        keyName(
-          controls[
-            waitingForAction.dataset.action
-          ]
-        );
-
-      waitingForAction = null;
-
-      return;
-    }
-
-    const action =
-      waitingForAction.dataset.action;
-
-    const newKey = normalizedKey(e);
-
-    if (
-      ["p", "escape"].includes(newKey) ||
-      newKey === ""
-    ) {
-      return;
-    }
-
-    const other = Object.keys(controls).find(
-      a =>
-        a !== action &&
-        controls[a] === newKey
-    );
-
-    if (other) {
-      return;
-    }
-
-    controls[action] = newKey;
-
-    saveControls();
-    updateControlUI();
-
-    waitingForAction = null;
-
-    return;
-  }
-
-  const k = normalizedKey(e);
-
-  if (k === "space") {
-    e.preventDefault();
-  }
-
-  if (
-    gameRunning &&
-    !goalActive &&
-    k === "p"
-  ) {
-    togglePause();
-    return;
-  }
-
-  keys[k] = true;
-});
-
-document.addEventListener("keyup", e => {
-  keys[normalizedKey(e)] = false;
-});
-
-window.addEventListener("blur", clearKeys);
-
 /* =========================================================
-   RÉGLAGES
+   CLAVIER
 ========================================================= */
 
-for (const action of Object.keys(keyButtons)) {
-  keyButtons[action]?.addEventListener(
-    "click",
-    () => {
-      if (waitingForAction) return;
+document.addEventListener(
+  "keydown",
+  e => {
+    if (
+      waitingForAction
+    ) {
+      e.preventDefault();
 
-      waitingForAction = keyButtons[action];
+      if (
+        e.key === "Escape"
+      ) {
+        const action =
+          waitingForAction
+            .dataset.action;
 
-      waitingForAction.dataset.action = action;
+        waitingForAction
+          .textContent =
+          keyName(
+            controls[action]
+          );
 
-      waitingForAction.textContent =
-        "PRESS A KEY";
+        waitingForAction =
+          null;
+
+        return;
+      }
+
+      const action =
+        waitingForAction
+          .dataset.action;
+
+      const newKey =
+        normalizedKey(e);
+
+      if (
+        newKey === "" ||
+        newKey === "p" ||
+        newKey === "escape"
+      ) {
+        return;
+      }
+
+      const alreadyUsed =
+        Object.keys(
+          controls
+        ).find(
+          a =>
+            a !== action &&
+            controls[a] ===
+              newKey
+        );
+
+      if (alreadyUsed) {
+        return;
+      }
+
+      controls[action] =
+        newKey;
+
+      saveControls();
+
+      updateControlUI();
+
+      waitingForAction =
+        null;
+
+      return;
     }
-  );
-}
 
-$("resetControlsButton")?.addEventListener(
-  "click",
-  () => {
-    controls = { ...defaults };
+    const k =
+      normalizedKey(e);
 
-    saveControls();
-    updateControlUI();
+    if (
+      k === "space"
+    ) {
+      e.preventDefault();
+    }
+
+    if (
+      gameRunning &&
+      !goalActive &&
+      k === "p"
+    ) {
+      togglePause();
+      return;
+    }
+
+    keys[k] = true;
   }
 );
 
-$("settingsButton")?.addEventListener(
-  "click",
-  () => openSettings("main")
+document.addEventListener(
+  "keyup",
+  e => {
+    keys[
+      normalizedKey(e)
+    ] = false;
+  }
 );
 
-$("pauseSettingsButton")?.addEventListener(
-  "click",
-  () => openSettings("pause")
+window.addEventListener(
+  "blur",
+  clearKeys
 );
 
-function openSettings(from) {
+/* =========================================================
+   REGLAGES
+========================================================= */
+
+for (
+  const action of
+  Object.keys(keyButtons)
+) {
+  keyButtons[action]
+    ?.addEventListener(
+      "click",
+      () => {
+        if (
+          waitingForAction
+        ) {
+          return;
+        }
+
+        waitingForAction =
+          keyButtons[action];
+
+        waitingForAction
+          .dataset.action =
+          action;
+
+        waitingForAction
+          .textContent =
+          "PRESS A KEY";
+      }
+    );
+}
+
+$("resetControlsButton")
+  ?.addEventListener(
+    "click",
+    () => {
+      controls = {
+        ...defaults
+      };
+
+      saveControls();
+
+      updateControlUI();
+    }
+  );
+
+$("settingsButton")
+  ?.addEventListener(
+    "click",
+    () =>
+      openSettings("main")
+  );
+
+$("pauseSettingsButton")
+  ?.addEventListener(
+    "click",
+    () =>
+      openSettings("pause")
+  );
+
+function openSettings(
+  from
+) {
   settingsReturn = from;
 
-  mainMenu?.classList.add("hidden");
-  howToPlayMenu?.classList.add("hidden");
-  pauseMenu?.classList.add("hidden");
+  mainMenu?.classList.add(
+    "hidden"
+  );
 
-  settingsMenu?.classList.remove("hidden");
+  howToPlayMenu?.classList.add(
+    "hidden"
+  );
+
+  pauseMenu?.classList.add(
+    "hidden"
+  );
+
+  settingsMenu?.classList.remove(
+    "hidden"
+  );
 
   updateControlUI();
 }
 
-$("settingsBackButton")?.addEventListener(
-  "click",
-  () => {
-    settingsMenu?.classList.add("hidden");
+$("settingsBackButton")
+  ?.addEventListener(
+    "click",
+    () => {
+      settingsMenu?.classList.add(
+        "hidden"
+      );
 
-    if (
-      settingsReturn === "pause" &&
-      gameRunning
-    ) {
-      pauseMenu?.classList.remove("hidden");
-    } else {
-      mainMenu?.classList.remove("hidden");
+      if (
+        settingsReturn ===
+          "pause" &&
+        gameRunning
+      ) {
+        pauseMenu?.classList.remove(
+          "hidden"
+        );
+      } else {
+        mainMenu?.classList.remove(
+          "hidden"
+        );
+      }
     }
-  }
-);
+  );
 
-$("howToPlayButton")?.addEventListener(
-  "click",
-  () => {
-    mainMenu?.classList.add("hidden");
-    howToPlayMenu?.classList.remove("hidden");
+$("howToPlayButton")
+  ?.addEventListener(
+    "click",
+    () => {
+      mainMenu?.classList.add(
+        "hidden"
+      );
 
-    updateControlUI();
-  }
-);
+      howToPlayMenu?.classList.remove(
+        "hidden"
+      );
 
-$("backButton")?.addEventListener(
-  "click",
-  () => {
-    howToPlayMenu?.classList.add("hidden");
-    mainMenu?.classList.remove("hidden");
-  }
-);
+      updateControlUI();
+    }
+  );
+
+$("backButton")
+  ?.addEventListener(
+    "click",
+    () => {
+      howToPlayMenu?.classList.add(
+        "hidden"
+      );
+
+      mainMenu?.classList.remove(
+        "hidden"
+      );
+    }
+  );
 
 /* =========================================================
-   VARIABLES DU MATCH
+   VARIABLES MATCH
 ========================================================= */
 
 let blueScore = 0;
@@ -855,74 +1427,13 @@ let countdownTimer = null;
 let countdownFinish = null;
 let introTimer = null;
 
-let lastTime = performance.now();
-
 let pointsTimer = null;
+
+let lastTime =
+  performance.now();
 
 let saveCooldown = 0;
 let saveDangerHandled = false;
-
-/* =========================================================
-   POINTS
-========================================================= */
-
-function setText(el, value) {
-  if (el) {
-    el.textContent = value;
-  }
-}
-
-function updatePoints() {
-  setText(playerPointsEl, playerPoints);
-}
-
-function awardPoints(amount, reason) {
-  playerPoints += amount;
-
-  updatePoints();
-
-  if (pointsNotification) {
-    clearTimeout(pointsTimer);
-
-    pointsNotification.textContent =
-      `+${amount} ${reason}`;
-
-    pointsNotification.classList.remove(
-      "show"
-    );
-
-    void pointsNotification.offsetWidth;
-
-    pointsNotification.classList.add("show");
-
-    pointsTimer = setTimeout(() => {
-      pointsNotification.classList.remove(
-        "show"
-      );
-    }, 1100);
-  }
-
-  pointsPanel?.classList.remove("earned");
-
-  if (pointsPanel) {
-    void pointsPanel.offsetWidth;
-
-    pointsPanel.classList.add("earned");
-  }
-}
-
-function resetPoints() {
-  playerPoints = 0;
-
-  saveCooldown = 0;
-  saveDangerHandled = false;
-
-  updatePoints();
-
-  pointsNotification?.classList.remove(
-    "show"
-  );
-}
 
 /* =========================================================
    TERRAIN
@@ -941,13 +1452,19 @@ const goal = {
   depth: 70
 };
 
-/* Zone invisible pour les sauvegardes */
-
 const saveZone = {
-  x: field.left + 10,
-  y: goal.top + 12,
+  x:
+    field.left + 10,
+
+  y:
+    goal.top + 12,
+
   width: 145,
-  height: goal.bottom - goal.top - 24
+
+  height:
+    goal.bottom -
+    goal.top -
+    24
 };
 
 /* =========================================================
@@ -1020,11 +1537,19 @@ let goalFlash = 0;
 ========================================================= */
 
 class Car {
-  constructor(x, y, color, bot = false) {
+
+  constructor(
+    x,
+    y,
+    color,
+    bot = false
+  ) {
+
     this.startX = x;
     this.startY = y;
 
     this.color = color;
+
     this.isBot = bot;
 
     this.radius = 25;
@@ -1032,127 +1557,200 @@ class Car {
     this.x = x;
     this.y = y;
 
-    this.angle = bot ? Math.PI : 0;
+    this.angle =
+      bot
+        ? Math.PI
+        : 0;
 
     this.speed = 0;
 
-    this.maxSpeed = 7.2;
-    this.boostMax = 11.7;
+    this.maxSpeed =
+      7.2;
+
+    this.boostMax =
+      11.7;
 
     this.boost = 100;
 
-    this.boosting = false;
+    this.boosting =
+      false;
 
-    this.ballContact = false;
+    this.ballContact =
+      false;
 
-    this.aiTarget = null;
+    this.aiTarget =
+      null;
+
     this.aiThink = 0;
   }
 
   reset() {
-    this.x = this.startX;
-    this.y = this.startY;
 
-    this.angle = this.isBot
-      ? Math.PI
-      : 0;
+    this.x =
+      this.startX;
+
+    this.y =
+      this.startY;
+
+    this.angle =
+      this.isBot
+        ? Math.PI
+        : 0;
 
     this.speed = 0;
 
     this.boost = 100;
 
-    this.boosting = false;
+    this.boosting =
+      false;
 
-    this.ballContact = false;
+    this.ballContact =
+      false;
 
-    this.aiTarget = null;
+    this.aiTarget =
+      null;
+
     this.aiThink = 0;
   }
 
   update() {
-    if (this.isBot) {
+
+    if (
+      this.isBot
+    ) {
       this.updateAI();
     } else {
       this.updatePlayer();
     }
 
     this.x +=
-      Math.cos(this.angle) *
+      Math.cos(
+        this.angle
+      ) *
       this.speed;
 
     this.y +=
-      Math.sin(this.angle) *
+      Math.sin(
+        this.angle
+      ) *
       this.speed;
 
-    this.speed *= 0.985;
+    this.speed *=
+      0.985;
 
-    if (Math.abs(this.speed) < 0.02) {
+    if (
+      Math.abs(
+        this.speed
+      ) < 0.02
+    ) {
       this.speed = 0;
     }
 
     this.keepInside();
 
-    this.boost = Math.min(
-      100,
-      this.boost + 0.025
-    );
+    this.boost =
+      Math.min(
+        100,
+        this.boost +
+          0.025
+      );
   }
 
   updatePlayer() {
-    this.boosting = false;
 
-    if (controlPressed("forward")) {
-      this.speed += 0.18;
+    this.boosting =
+      false;
+
+    if (
+      controlPressed(
+        "forward"
+      )
+    ) {
+      this.speed +=
+        0.18;
     }
 
-    if (controlPressed("reverse")) {
-      if (this.speed > 0) {
-        this.speed -= 0.25;
+    if (
+      controlPressed(
+        "reverse"
+      )
+    ) {
+      if (
+        this.speed > 0
+      ) {
+        this.speed -=
+          0.25;
       } else {
-        this.speed -= 0.12;
+        this.speed -=
+          0.12;
       }
     }
 
     const turn =
       0.055 *
       Math.min(
-        Math.abs(this.speed) / 2 + 0.3,
+        Math.abs(
+          this.speed
+        ) / 2 +
+          0.3,
         1
       );
 
-    if (controlPressed("left")) {
+    if (
+      controlPressed(
+        "left"
+      )
+    ) {
       this.angle -=
         turn *
-        (this.speed >= 0 ? 1 : -1);
-    }
-
-    if (controlPressed("right")) {
-      this.angle +=
-        turn *
-        (this.speed >= 0 ? 1 : -1);
+        (
+          this.speed >= 0
+            ? 1
+            : -1
+        );
     }
 
     if (
-      controlPressed("boost") &&
+      controlPressed(
+        "right"
+      )
+    ) {
+      this.angle +=
+        turn *
+        (
+          this.speed >= 0
+            ? 1
+            : -1
+        );
+    }
+
+    if (
+      controlPressed(
+        "boost"
+      ) &&
       this.boost > 0 &&
       this.speed > 0
     ) {
-      this.speed += 0.28;
+      this.speed +=
+        0.28;
 
-      this.boost -= 0.7;
+      this.boost -=
+        0.7;
 
-      this.boosting = true;
+      this.boosting =
+        true;
     }
 
-    this.speed = Math.max(
-      -3.2,
-      Math.min(
-        this.speed,
-        this.boosting
-          ? this.boostMax
-          : this.maxSpeed
-      )
-    );
+    this.speed =
+      Math.max(
+        -3.2,
+        Math.min(
+          this.speed,
+          this.boosting
+            ? this.boostMax
+            : this.maxSpeed
+        )
+      );
   }
 
   /* =======================================================
@@ -1160,103 +1758,140 @@ class Car {
   ======================================================= */
 
   updateAI() {
-    const dxBall =
-      ball.x - this.x;
 
-    const dyBall =
-      ball.y - this.y;
+    const dx =
+      ball.x -
+      this.x;
 
-    const distBall =
-      Math.hypot(dxBall, dyBall);
+    const dy =
+      ball.y -
+      this.y;
 
-    let tx = ball.x;
-    let ty = ball.y;
+    const dist =
+      Math.hypot(
+        dx,
+        dy
+      );
 
-    /* Défense */
+    let tx =
+      ball.x;
+
+    let ty =
+      ball.y;
+
+    const dangerous =
+      ball.x >
+        field.right -
+          270 &&
+      ball.vx > 0;
 
     if (
-      ball.x >
-        field.right - 270 &&
-      ball.vx > 0
+      dangerous
     ) {
+
       tx =
         Math.min(
-          field.right - 55,
+          field.right -
+            55,
           ball.x + 55
         );
 
       ty =
         H / 2 +
-        (ball.y - H / 2) *
+        (
+          ball.y -
+          H / 2
+        ) *
           0.7;
-    }
 
-    /* Attaque */
-
-    else if (
-      ball.x < W * 0.42
+    } else if (
+      ball.x <
+      W * 0.42
     ) {
-      tx = ball.x + 45;
-      ty = ball.y;
+
+      tx =
+        ball.x + 45;
+
+      ty =
+        ball.y;
     }
 
-    /* Recherche de boost */
-
-    this.aiThink -= 1 / 60;
-
-    const dangerous =
-      ball.x >
-        field.right - 270 &&
-      ball.vx > 0;
+    this.aiThink -=
+      1 / 60;
 
     if (
       this.boost < 25 &&
-      distBall > 180 &&
+      dist > 180 &&
       !dangerous
     ) {
+
       if (
         !this.aiTarget ||
         this.aiThink <= 0 ||
-        this.aiTarget.cooldown > 0
+        this.aiTarget
+          .cooldown > 0
       ) {
-        let best = null;
-        let bestD = Infinity;
 
-        for (const pad of boostPads) {
-          if (pad.cooldown > 0) {
+        let best =
+          null;
+
+        let bestD =
+          Infinity;
+
+        for (
+          const pad of
+          boostPads
+        ) {
+
+          if (
+            pad.cooldown >
+            0
+          ) {
             continue;
           }
 
           const d =
             Math.hypot(
-              pad.x - this.x,
-              pad.y - this.y
+              pad.x -
+                this.x,
+              pad.y -
+                this.y
             );
 
-          if (d < bestD) {
+          if (
+            d < bestD
+          ) {
             bestD = d;
             best = pad;
           }
         }
 
-        this.aiTarget = best;
-        this.aiThink = 0.5;
+        this.aiTarget =
+          best;
+
+        this.aiThink =
+          0.5;
       }
 
-      if (this.aiTarget) {
-        tx = this.aiTarget.x;
-        ty = this.aiTarget.y;
-      }
-    }
+      if (
+        this.aiTarget
+      ) {
 
-    else if (
+        tx =
+          this.aiTarget.x;
+
+        ty =
+          this.aiTarget.y;
+      }
+
+    } else if (
       this.boost > 45 ||
       dangerous
     ) {
-      this.aiTarget = null;
-    }
 
-    /* Rotation IA */
+      this.aiTarget =
+        null;
+    }
 
     const targetAngle =
       Math.atan2(
@@ -1265,38 +1900,50 @@ class Car {
       );
 
     let diff =
-      targetAngle - this.angle;
+      targetAngle -
+      this.angle;
 
-    while (diff > Math.PI) {
-      diff -= Math.PI * 2;
+    while (
+      diff > Math.PI
+    ) {
+      diff -=
+        Math.PI * 2;
     }
 
-    while (diff < -Math.PI) {
-      diff += Math.PI * 2;
+    while (
+      diff < -Math.PI
+    ) {
+      diff +=
+        Math.PI * 2;
     }
 
-    const turn = 0.062;
-
-    if (diff > 0.06) {
-      this.angle += turn;
-    }
-
-    else if (diff < -0.06) {
-      this.angle -= turn;
+    if (
+      diff > 0.06
+    ) {
+      this.angle +=
+        0.062;
+    } else if (
+      diff < -0.06
+    ) {
+      this.angle -=
+        0.062;
     }
 
     const aligned =
-      Math.abs(diff) < 0.32;
+      Math.abs(diff) <
+      0.32;
 
     const attack =
-      ball.x < W * 0.55 &&
-      this.x > ball.x;
+      ball.x <
+        W * 0.55 &&
+      this.x >
+        ball.x;
 
     this.boosting =
       this.boost > 4 &&
       aligned &&
       (
-        distBall > 260 ||
+        dist > 260 ||
         attack ||
         !!this.aiTarget
       );
@@ -1306,8 +1953,11 @@ class Car {
         ? 0.24
         : 0.145;
 
-    if (this.boosting) {
-      this.boost -= 0.55;
+    if (
+      this.boosting
+    ) {
+      this.boost -=
+        0.55;
     }
 
     this.speed =
@@ -1318,63 +1968,105 @@ class Car {
           : 6.7
       );
 
-    /* Prendre un pad */
+    if (
+      this.aiTarget
+    ) {
 
-    if (this.aiTarget) {
       const d =
         Math.hypot(
-          this.aiTarget.x - this.x,
-          this.aiTarget.y - this.y
+          this.aiTarget.x -
+            this.x,
+          this.aiTarget.y -
+            this.y
         );
 
       if (
         d <
-          this.radius + 22 &&
-        this.aiTarget.cooldown <= 0
+          this.radius +
+            22 &&
+        this.aiTarget
+          .cooldown <= 0
       ) {
+
         this.boost =
           Math.min(
             100,
-            this.boost + 25
+            this.boost +
+              25
           );
 
-        this.aiTarget.cooldown = 5;
-        this.aiTarget.flash = 1;
+        this.aiTarget
+          .cooldown = 5;
+
+        this.aiTarget
+          .flash = 1;
 
         spawnPadParticles(
           this.aiTarget
         );
 
-        this.aiTarget = null;
+        this.aiTarget =
+          null;
       }
     }
   }
 
   keepInside() {
-    const r = this.radius;
 
-    if (this.x < field.left + r) {
-      this.x = field.left + r;
-      this.speed *= -0.3;
+    const r =
+      this.radius;
+
+    if (
+      this.x <
+      field.left + r
+    ) {
+
+      this.x =
+        field.left + r;
+
+      this.speed *=
+        -0.3;
     }
 
-    if (this.x > field.right - r) {
-      this.x = field.right - r;
-      this.speed *= -0.3;
+    if (
+      this.x >
+      field.right - r
+    ) {
+
+      this.x =
+        field.right - r;
+
+      this.speed *=
+        -0.3;
     }
 
-    if (this.y < field.top + r) {
-      this.y = field.top + r;
-      this.speed *= -0.3;
+    if (
+      this.y <
+      field.top + r
+    ) {
+
+      this.y =
+        field.top + r;
+
+      this.speed *=
+        -0.3;
     }
 
-    if (this.y > field.bottom - r) {
-      this.y = field.bottom - r;
-      this.speed *= -0.3;
+    if (
+      this.y >
+      field.bottom - r
+    ) {
+
+      this.y =
+        field.bottom - r;
+
+      this.speed *=
+        -0.3;
     }
   }
 
   draw() {
+
     ctx.save();
 
     ctx.translate(
@@ -1382,30 +2074,47 @@ class Car {
       this.y
     );
 
-    ctx.rotate(this.angle);
+    ctx.rotate(
+      this.angle
+    );
 
-    if (this.boosting) {
+    if (
+      this.boosting
+    ) {
+
       ctx.fillStyle =
         "rgba(80,220,255,.7)";
 
       ctx.beginPath();
 
-      ctx.moveTo(-35, -11);
+      ctx.moveTo(
+        -35,
+        -11
+      );
 
       ctx.lineTo(
-        -65 - Math.random() * 18,
+        -65 -
+          Math.random() *
+            18,
         0
       );
 
-      ctx.lineTo(-35, 11);
+      ctx.lineTo(
+        -35,
+        11
+      );
 
       ctx.fill();
     }
 
-    ctx.shadowColor = this.color;
-    ctx.shadowBlur = 18;
+    ctx.shadowColor =
+      this.color;
 
-    ctx.fillStyle = this.color;
+    ctx.shadowBlur =
+      18;
+
+    ctx.fillStyle =
+      this.color;
 
     roundRect(
       -28,
@@ -1417,9 +2126,11 @@ class Car {
 
     ctx.fill();
 
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur =
+      0;
 
-    ctx.fillStyle = "#08101a";
+    ctx.fillStyle =
+      "#08101a";
 
     roundRect(
       -5,
@@ -1431,7 +2142,8 @@ class Car {
 
     ctx.fill();
 
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle =
+      "#fff";
 
     ctx.fillRect(
       20,
@@ -1447,7 +2159,8 @@ class Car {
       7
     );
 
-    ctx.fillStyle = "#05070b";
+    ctx.fillStyle =
+      "#05070b";
 
     ctx.fillRect(
       -18,
@@ -1486,124 +2199,221 @@ class Car {
 ========================================================= */
 
 class Ball {
+
   constructor() {
-    this.radius = 18;
+
+    this.radius =
+      18;
+
+    this.vx = 0;
+    this.vy = 0;
+
+    this.previousSpeed =
+      0;
+
+    this.pinchTimer =
+      0;
 
     this.reset();
   }
 
   reset() {
-    this.x = W / 2;
-    this.y = H / 2;
+
+    this.x =
+      W / 2;
+
+    this.y =
+      H / 2;
 
     this.vx = 0;
+
     this.vy = 0;
+
+    this.previousSpeed =
+      0;
+
+    this.pinchTimer =
+      0;
+  }
+
+  getSpeed() {
+
+    return Math.hypot(
+      this.vx,
+      this.vy
+    );
+  }
+
+  getSpeedKmh() {
+
+    /*
+      9 unités/s = 216 km/h
+    */
+
+    return Math.round(
+      Math.min(
+        216,
+        this.getSpeed() *
+          (216 / 9)
+      )
+    );
   }
 
   update() {
-    this.x += this.vx;
-    this.y += this.vy;
 
-    this.vx *= 0.992;
-    this.vy *= 0.992;
+    this.x +=
+      this.vx;
 
-    const s =
-      Math.hypot(
-        this.vx,
-        this.vy
-      );
+    this.y +=
+      this.vy;
 
-    if (s > 9) {
-      this.vx =
-        this.vx / s * 9;
+    this.vx *=
+      0.992;
 
-      this.vy =
-        this.vy / s * 9;
+    this.vy *=
+      0.992;
+
+    const speed =
+      this.getSpeed();
+
+    this.previousSpeed =
+      speed;
+
+    if (
+      speed > 9
+    ) {
+
+      const ratio =
+        9 / speed;
+
+      this.vx *=
+        ratio;
+
+      this.vy *=
+        ratio;
     }
+
+    this.pinchTimer =
+      Math.max(
+        0,
+        this.pinchTimer -
+          1 / 60
+      );
 
     this.checkGoal();
 
-    if (!goalActive) {
+    if (
+      !goalActive
+    ) {
       this.walls();
     }
   }
 
   checkGoal() {
+
     const inOpening =
-      this.y + this.radius >
+      this.y +
+        this.radius >
         goal.top &&
-      this.y - this.radius <
+      this.y -
+        this.radius <
         goal.bottom;
 
-    if (!inOpening) return;
-
     if (
-      this.x - this.radius <=
-      field.left - 2
+      !inOpening
     ) {
-      scoreGoal("orange");
+      return;
     }
 
-    else if (
-      this.x + this.radius >=
+    if (
+      this.x -
+        this.radius <=
+      field.left - 2
+    ) {
+
+      scoreGoal(
+        "orange"
+      );
+
+    } else if (
+      this.x +
+        this.radius >=
       field.right + 2
     ) {
-      scoreGoal("blue");
+
+      scoreGoal(
+        "blue"
+      );
     }
   }
 
   walls() {
+
     if (
-      this.y - this.radius <
+      this.y -
+        this.radius <
       field.top
     ) {
-      this.y =
-        field.top + this.radius;
 
-      this.vy *= -0.82;
+      this.y =
+        field.top +
+        this.radius;
+
+      this.vy *=
+        -0.82;
     }
 
     if (
-      this.y + this.radius >
+      this.y +
+        this.radius >
       field.bottom
     ) {
-      this.y =
-        field.bottom - this.radius;
 
-      this.vy *= -0.82;
+      this.y =
+        field.bottom -
+        this.radius;
+
+      this.vy *=
+        -0.82;
     }
 
     const inOpening =
-      this.y + this.radius >
+      this.y +
+        this.radius >
         goal.top &&
-      this.y - this.radius <
+      this.y -
+        this.radius <
         goal.bottom;
 
     if (
-      this.x - this.radius <
+      this.x -
+        this.radius <
         field.left &&
       !inOpening
     ) {
+
       this.x =
         field.left +
         this.radius;
 
-      this.vx *= -0.82;
+      this.vx *=
+        -0.82;
     }
 
     if (
-      this.x + this.radius >
+      this.x +
+        this.radius >
         field.right &&
       !inOpening
     ) {
+
       this.x =
         field.right -
         this.radius;
 
-      this.vx *= -0.82;
+      this.vx *=
+        -0.82;
     }
-
-    /* Fond des cages */
 
     if (
       inOpening &&
@@ -1612,12 +2422,14 @@ class Ball {
         goal.depth +
         this.radius
     ) {
+
       this.x =
         field.left -
         goal.depth +
         this.radius;
 
-      this.vx *= -0.82;
+      this.vx *=
+        -0.82;
     }
 
     if (
@@ -1627,20 +2439,26 @@ class Ball {
         goal.depth -
         this.radius
     ) {
+
       this.x =
         field.right +
         goal.depth -
         this.radius;
 
-      this.vx *= -0.82;
+      this.vx *=
+        -0.82;
     }
   }
 
   draw() {
+
     ctx.save();
 
-    ctx.shadowColor = "#fff";
-    ctx.shadowBlur = 18;
+    ctx.shadowColor =
+      "#fff";
+
+    ctx.shadowBlur =
+      18;
 
     const g =
       ctx.createRadialGradient(
@@ -1658,7 +2476,7 @@ class Ball {
     );
 
     g.addColorStop(
-      0.55,
+      .55,
       "#dce7f0"
     );
 
@@ -1667,7 +2485,8 @@ class Ball {
       "#7d91a3"
     );
 
-    ctx.fillStyle = g;
+    ctx.fillStyle =
+      g;
 
     ctx.beginPath();
 
@@ -1704,30 +2523,40 @@ const bot =
     true
   );
 
-const ball = new Ball();
+const ball =
+  new Ball();
 
 /* =========================================================
    SAUVEGARDE
 ========================================================= */
 
 function playerInSaveZone() {
+
   return (
-    player.x >= saveZone.x &&
+    player.x >=
+      saveZone.x &&
+
     player.x <=
       saveZone.x +
-      saveZone.width &&
-    player.y >= saveZone.y &&
+        saveZone.width &&
+
+    player.y >=
+      saveZone.y &&
+
     player.y <=
       saveZone.y +
-      saveZone.height
+        saveZone.height
   );
 }
 
 function ballDangerous() {
+
   const inLane =
-    ball.y + ball.radius >
+    ball.y +
+      ball.radius >
       goal.top &&
-    ball.y - ball.radius <
+    ball.y -
+      ball.radius <
       goal.bottom;
 
   const close =
@@ -1738,7 +2567,8 @@ function ballDangerous() {
     inLane &&
     close &&
     (
-      ball.vx < -0.1 ||
+      ball.vx <
+        -0.1 ||
       ball.x <
         field.left + 105
     )
@@ -1746,25 +2576,39 @@ function ballDangerous() {
 }
 
 /* =========================================================
-   COLLISION VOITURE / BALLON
+   COLLISION VOITURE / BALLE
+   + PINCH
 ========================================================= */
 
-function carBallCollision(car) {
+function carBallCollision(
+  car
+) {
+
   const dx =
-    ball.x - car.x;
+    ball.x -
+    car.x;
 
   const dy =
-    ball.y - car.y;
+    ball.y -
+    car.y;
 
   const d =
-    Math.hypot(dx, dy);
+    Math.hypot(
+      dx,
+      dy
+    );
 
   const minD =
     car.radius +
     ball.radius;
 
-  if (d >= minD) {
-    car.ballContact = false;
+  if (
+    d >= minD
+  ) {
+
+    car.ballContact =
+      false;
+
     return;
   }
 
@@ -1775,12 +2619,14 @@ function carBallCollision(car) {
   const newContact =
     !car.ballContact;
 
-  car.ballContact = true;
+  car.ballContact =
+    true;
 
   if (
     car === player &&
     newContact
   ) {
+
     awardPoints(
       2,
       "BALL TOUCH"
@@ -1805,9 +2651,19 @@ function carBallCollision(car) {
   ball.y +=
     ny * overlap;
 
+  const ballBefore =
+    ball.getSpeed();
+
+  /*
+    Collision normale
+  */
+
   const force =
     Math.min(
-      Math.abs(car.speed) * 1.15 +
+      Math.abs(
+        car.speed
+      ) *
+        1.15 +
         1.2,
       7
     );
@@ -1818,19 +2674,180 @@ function carBallCollision(car) {
   ball.vy +=
     ny * force;
 
+  /*
+    Direction de la voiture
+  */
+
   ball.vx +=
-    Math.cos(car.angle) *
-    Math.abs(car.speed) *
+    Math.cos(
+      car.angle
+    ) *
+    Math.abs(
+      car.speed
+    ) *
     0.25;
 
   ball.vy +=
-    Math.sin(car.angle) *
-    Math.abs(car.speed) *
+    Math.sin(
+      car.angle
+    ) *
+    Math.abs(
+      car.speed
+    ) *
     0.25;
 
-  car.speed *= 0.82;
+  /*
+    PINCH
+    Si la voiture arrive très vite
+    contre une balle proche d'une
+    surface ou si la vitesse relative
+    est importante, on donne un gros
+    boost à la balle.
+  */
 
-  /* SAVE */
+  const carVX =
+    Math.cos(
+      car.angle
+    ) *
+    car.speed;
+
+  const carVY =
+    Math.sin(
+      car.angle
+    ) *
+    car.speed;
+
+  const relativeVX =
+    carVX -
+    ball.vx;
+
+  const relativeVY =
+    carVY -
+    ball.vy;
+
+  const relativeSpeed =
+    Math.hypot(
+      relativeVX,
+      relativeVY
+    );
+
+  const forwardImpact =
+    relativeVX * nx +
+    relativeVY * ny;
+
+  const nearWall =
+    ball.x <
+      field.left + 42 ||
+    ball.x >
+      field.right - 42 ||
+    ball.y <
+      field.top + 42 ||
+    ball.y >
+      field.bottom - 42;
+
+  const pinch =
+    Math.abs(
+      forwardImpact
+    ) > 5.0 &&
+    relativeSpeed > 5.5 &&
+    (
+      nearWall ||
+      Math.abs(
+        car.speed
+      ) > 5.5
+    );
+
+  if (
+    pinch
+  ) {
+
+    const direction =
+      car.speed >= 0
+        ? 1
+        : -1;
+
+    const pinchPower =
+      Math.min(
+        9,
+        Math.max(
+          ball.getSpeed(),
+          relativeSpeed *
+            1.25
+        )
+      );
+
+    const targetVX =
+      nx *
+      pinchPower *
+      direction;
+
+    const targetVY =
+      ny *
+      pinchPower *
+      direction;
+
+    ball.vx =
+      ball.vx * 0.18 +
+      targetVX * 0.82;
+
+    ball.vy =
+      ball.vy * 0.18 +
+      targetVY * 0.82;
+
+    ball.pinchTimer =
+      0.45;
+
+    showPinchEffect();
+
+  } else {
+
+    /*
+      Petite accélération
+      supplémentaire pour les
+      grosses frappes.
+    */
+
+    if (
+      relativeSpeed > 7
+    ) {
+
+      ball.vx *=
+        1.06;
+
+      ball.vy *=
+        1.06;
+    }
+  }
+
+  /*
+    Limite physique :
+    216 km/h
+  */
+
+  const finalSpeed =
+    ball.getSpeed();
+
+  if (
+    finalSpeed > 9
+  ) {
+
+    const ratio =
+      9 /
+      finalSpeed;
+
+    ball.vx *=
+      ratio;
+
+    ball.vy *=
+      ratio;
+  }
+
+  car.speed *=
+    0.82;
+
+  /*
+    SAVE
+  */
 
   if (
     car === player &&
@@ -1840,17 +2857,23 @@ function carBallCollision(car) {
     saveCooldown <= 0 &&
     !saveDangerHandled
   ) {
-    saveCooldown = 4;
 
-    saveDangerHandled = true;
+    saveCooldown =
+      4;
+
+    saveDangerHandled =
+      true;
 
     ball.vx =
       Math.max(
         1.8,
-        Math.abs(ball.vx) * 0.65
+        Math.abs(
+          ball.vx
+        ) * 0.65
       );
 
-    ball.vy *= 0.65;
+    ball.vy *=
+      0.65;
 
     awardPoints(
       50,
@@ -1860,18 +2883,59 @@ function carBallCollision(car) {
 }
 
 /* =========================================================
+   EFFET PINCH
+========================================================= */
+
+let pinchEffectTimer = 0;
+
+function showPinchEffect() {
+
+  pinchEffectTimer =
+    0.35;
+
+  if (
+    ballSpeedPanel
+  ) {
+
+    ballSpeedPanel
+      .classList.add(
+        "pinch"
+      );
+
+    setTimeout(
+      () => {
+        ballSpeedPanel
+          ?.classList.remove(
+            "pinch"
+          );
+      },
+      300
+    );
+  }
+}
+
+/* =========================================================
    COLLISION VOITURE / VOITURE
 ========================================================= */
 
-function carCarCollision(a, b) {
+function carCarCollision(
+  a,
+  b
+) {
+
   const dx =
-    b.x - a.x;
+    b.x -
+    a.x;
 
   const dy =
-    b.y - a.y;
+    b.y -
+    a.y;
 
   const d =
-    Math.hypot(dx, dy);
+    Math.hypot(
+      dx,
+      dy
+    );
 
   const minD =
     a.radius +
@@ -1894,75 +2958,105 @@ function carCarCollision(a, b) {
     minD - d;
 
   a.x -=
-    nx * overlap / 2;
+    nx *
+    overlap /
+    2;
 
   a.y -=
-    ny * overlap / 2;
+    ny *
+    overlap /
+    2;
 
   b.x +=
-    nx * overlap / 2;
+    nx *
+    overlap /
+    2;
 
   b.y +=
-    ny * overlap / 2;
+    ny *
+    overlap /
+    2;
 
   const av =
     a.speed;
 
   a.speed =
-    b.speed * 0.55;
+    b.speed *
+    0.55;
 
   b.speed =
-    av * 0.55;
+    av *
+    0.55;
 
   a.keepInside();
   b.keepInside();
 }
 
 /* =========================================================
-   PARTICULES BOOST
+   PARTICULES
 ========================================================= */
 
-function spawnPadParticles(pad) {
-  for (let i = 0; i < 10; i++) {
+function spawnPadParticles(
+  pad
+) {
+
+  for (
+    let i = 0;
+    i < 10;
+    i++
+  ) {
+
     const a =
-      Math.PI * 2 * i / 10;
+      Math.PI *
+      2 *
+      i /
+      10;
 
     const s =
       1.2 +
-      Math.random() * 1.4;
+      Math.random() *
+      1.4;
 
     boostParticles.push({
       x: pad.x,
       y: pad.y,
 
       vx:
-        Math.cos(a) * s,
+        Math.cos(a) *
+        s,
 
       vy:
-        Math.sin(a) * s,
+        Math.sin(a) *
+        s,
 
-      life: 0.55,
+      life: .55,
 
       size:
         2 +
-        Math.random() * 2,
+        Math.random() *
+        2,
 
-      color: pad.color
+      color:
+        pad.color
     });
   }
 }
 
-/* =========================================================
-   PARTICULES BUT
-========================================================= */
+function spawnGoalParticles(
+  team
+) {
 
-function spawnGoalParticles(team) {
   const color =
     team === "blue"
       ? "#43d9ff"
       : "#ff9d2e";
 
-  for (let i = 0; i < 32; i++) {
+  for (
+    let i = 0;
+    i < 32;
+    i++
+  ) {
+
     const a =
       Math.random() *
       Math.PI *
@@ -1970,23 +3064,27 @@ function spawnGoalParticles(team) {
 
     const s =
       1.5 +
-      Math.random() * 3.5;
+      Math.random() *
+      3.5;
 
     goalParticles.push({
       x: W / 2,
       y: H / 2,
 
       vx:
-        Math.cos(a) * s,
+        Math.cos(a) *
+        s,
 
       vy:
-        Math.sin(a) * s,
+        Math.sin(a) *
+        s,
 
       life: 1.1,
 
       size:
         2 +
-        Math.random() * 4,
+        Math.random() *
+        4,
 
       color
     });
@@ -1997,11 +3095,14 @@ function spawnGoalParticles(team) {
    EFFETS
 ========================================================= */
 
-function updateEffects(dt) {
+function updateEffects(
+  dt
+) {
+
   const sec =
     Math.min(
       dt / 1000,
-      0.1
+      .1
     );
 
   goalFlash =
@@ -2011,31 +3112,55 @@ function updateEffects(dt) {
         sec * 2.2
     );
 
+  pinchEffectTimer =
+    Math.max(
+      0,
+      pinchEffectTimer -
+        sec
+    );
+
   for (
     const list of [
       boostParticles,
       goalParticles
     ]
   ) {
-    for (const p of list) {
-      p.x += p.vx;
-      p.y += p.vy;
 
-      p.vx *= 0.97;
-      p.vy *= 0.97;
+    for (
+      const p of list
+    ) {
 
-      p.life -= sec;
+      p.x +=
+        p.vx;
+
+      p.y +=
+        p.vy;
+
+      p.vx *=
+        .97;
+
+      p.vy *=
+        .97;
+
+      p.life -=
+        sec;
     }
 
     for (
-      let i = list.length - 1;
+      let i =
+        list.length - 1;
       i >= 0;
       i--
     ) {
+
       if (
-        list[i].life <= 0
+        list[i].life <=
+        0
       ) {
-        list.splice(i, 1);
+        list.splice(
+          i,
+          1
+        );
       }
     }
   }
@@ -2043,30 +3168,41 @@ function updateEffects(dt) {
   saveCooldown =
     Math.max(
       0,
-      saveCooldown - sec
+      saveCooldown -
+        sec
     );
 
-  if (!ballDangerous()) {
-    saveDangerHandled = false;
+  if (
+    !ballDangerous()
+  ) {
+    saveDangerHandled =
+      false;
   }
 }
 
 /* =========================================================
-   BOOST PADS
+   BOOST
 ========================================================= */
 
-function updateBoostPads(dt) {
+function updateBoostPads(
+  dt
+) {
+
   const sec =
     Math.min(
       dt / 1000,
-      0.1
+      .1
     );
 
-  for (const p of boostPads) {
+  for (
+    const p of boostPads
+  ) {
+
     p.cooldown =
       Math.max(
         0,
-        p.cooldown - sec
+        p.cooldown -
+          sec
       );
 
     p.pulse +=
@@ -2075,7 +3211,8 @@ function updateBoostPads(dt) {
     p.flash =
       Math.max(
         0,
-        p.flash - sec * 2.5
+        p.flash -
+          sec * 2.5
       );
   }
 
@@ -2087,28 +3224,46 @@ function updateBoostPads(dt) {
     return;
   }
 
-  for (const p of boostPads) {
-    if (p.cooldown > 0) {
+  for (
+    const p of boostPads
+  ) {
+
+    if (
+      p.cooldown > 0
+    ) {
       continue;
     }
 
-    if (
+    const playerDistance =
       Math.hypot(
-        player.x - p.x,
-        player.y - p.y
-      ) <
-      player.radius + 22
+        player.x -
+          p.x,
+        player.y -
+          p.y
+      );
+
+    if (
+      playerDistance <
+      player.radius +
+        22
     ) {
+
       player.boost =
         Math.min(
           100,
-          player.boost + 25
+          player.boost +
+            25
         );
 
-      p.cooldown = 5;
-      p.flash = 1;
+      p.cooldown =
+        5;
 
-      spawnPadParticles(p);
+      p.flash =
+        1;
+
+      spawnPadParticles(
+        p
+      );
     }
   }
 }
@@ -2117,7 +3272,10 @@ function updateBoostPads(dt) {
    BUT
 ========================================================= */
 
-function scoreGoal(team) {
+function scoreGoal(
+  team
+) {
+
   if (
     goalActive ||
     !gameRunning
@@ -2125,15 +3283,22 @@ function scoreGoal(team) {
     return;
   }
 
-  goalActive = true;
+  goalActive =
+    true;
 
   clearKeys();
 
-  goalFlash = 1;
+  goalFlash =
+    1;
 
-  spawnGoalParticles(team);
+  spawnGoalParticles(
+    team
+  );
 
-  if (team === "blue") {
+  if (
+    team === "blue"
+  ) {
+
     blueScore++;
 
     setText(
@@ -2156,16 +3321,19 @@ function scoreGoal(team) {
       "BLUE UNIT SCORES"
     );
 
-    if (goalText) {
+    if (
+      goalText
+    ) {
+
       goalText.style.color =
         "#43d9ff";
 
       goalText.style.textShadow =
         "0 0 25px #00aaff,0 0 80px #0077ff";
     }
-  }
 
-  else {
+  } else {
+
     orangeScore++;
 
     setText(
@@ -2183,7 +3351,10 @@ function scoreGoal(team) {
       "ORANGE CREW SCORES"
     );
 
-    if (goalText) {
+    if (
+      goalText
+    ) {
+
       goalText.style.color =
         "#ff9d2e";
 
@@ -2197,15 +3368,20 @@ function scoreGoal(team) {
   );
 
   goalTimer =
-    setTimeout(() => {
-      goalMessage?.classList.add(
-        "hidden"
-      );
+    setTimeout(
+      () => {
 
-      resetPositions();
+        goalMessage?.classList.add(
+          "hidden"
+        );
 
-      startCountdown();
-    }, 1800);
+        resetPositions();
+
+        startCountdown();
+
+      },
+      1800
+    );
 }
 
 /* =========================================================
@@ -2213,11 +3389,15 @@ function scoreGoal(team) {
 ========================================================= */
 
 function resetPositions() {
+
   player.reset();
+
   bot.reset();
+
   ball.reset();
 
-  saveDangerHandled = false;
+  saveDangerHandled =
+    false;
 }
 
 /* =========================================================
@@ -2225,12 +3405,20 @@ function resetPositions() {
 ========================================================= */
 
 function startCountdown() {
-  clearInterval(countdownTimer);
-  clearTimeout(countdownFinish);
 
-  goalActive = true;
+  clearInterval(
+    countdownTimer
+  );
 
-  let count = 3;
+  clearTimeout(
+    countdownFinish
+  );
+
+  goalActive =
+    true;
+
+  let count =
+    3;
 
   setText(
     countdownEl,
@@ -2242,45 +3430,63 @@ function startCountdown() {
   );
 
   countdownTimer =
-    setInterval(() => {
-      count--;
+    setInterval(
+      () => {
 
-      if (count > 0) {
-        setText(
-          countdownEl,
-          count
-        );
-      }
+        count--;
 
-      else {
-        clearInterval(
-          countdownTimer
-        );
+        if (
+          count > 0
+        ) {
 
-        countdownTimer = null;
+          setText(
+            countdownEl,
+            count
+          );
 
-        setText(
-          countdownEl,
-          "GO!"
-        );
+        } else {
 
-        countdownFinish =
-          setTimeout(() => {
-            countdownEl?.classList.add(
-              "hidden"
+          clearInterval(
+            countdownTimer
+          );
+
+          countdownTimer =
+            null;
+
+          setText(
+            countdownEl,
+            "GO!"
+          );
+
+          countdownFinish =
+            setTimeout(
+              () => {
+
+                countdownEl?.classList.add(
+                  "hidden"
+                );
+
+                goalActive =
+                  false;
+
+              },
+              700
             );
+        }
 
-            goalActive = false;
-          }, 700);
-      }
-    }, 1000);
+      },
+      1000
+    );
 }
 
 /* =========================================================
    TIMER
 ========================================================= */
 
-function updateTimer(dt) {
+function updateTimer(
+  dt
+) {
+
   if (
     !gameRunning ||
     paused ||
@@ -2292,12 +3498,18 @@ function updateTimer(dt) {
   gameTime -=
     dt / 1000;
 
-  if (gameTime <= 0) {
-    gameTime = 0;
+  if (
+    gameTime <= 0
+  ) {
+
+    gameTime =
+      0;
 
     updateTimerDisplay();
 
-    endMatch(false);
+    endMatch(
+      false
+    );
 
     return;
   }
@@ -2306,19 +3518,20 @@ function updateTimer(dt) {
 }
 
 function updateTimerDisplay() {
-  const m =
+
+  const minutes =
     Math.floor(
       gameTime / 60
     );
 
-  const s =
+  const seconds =
     Math.floor(
       gameTime % 60
     );
 
   setText(
     timerEl,
-    `${m}:${String(s).padStart(2,"0")}`
+    `${minutes}:${String(seconds).padStart(2,"0")}`
   );
 }
 
@@ -2326,7 +3539,10 @@ function updateTimerDisplay() {
    FIN DU MATCH
 ========================================================= */
 
-function endMatch(conceded = false) {
+function endMatch(
+  conceded = false
+) {
+
   if (
     !gameRunning &&
     !conceded
@@ -2334,11 +3550,14 @@ function endMatch(conceded = false) {
     return;
   }
 
-  gameRunning = false;
+  gameRunning =
+    false;
 
-  paused = false;
+  paused =
+    false;
 
-  goalActive = true;
+  goalActive =
+    true;
 
   clearKeys();
 
@@ -2378,56 +3597,41 @@ function endMatch(conceded = false) {
     "hidden"
   );
 
-  if (conceded) {
+  if (
+    conceded
+  ) {
+
     setText(
       winnerDisplay,
       "ORANGE WINS"
     );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
-  }
-
-  else if (
-    blueScore > orangeScore
+  } else if (
+    blueScore >
+    orangeScore
   ) {
+
     setText(
       winnerDisplay,
       "BLUE WINS"
     );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#43cfff";
-    }
-  }
-
-  else if (
-    orangeScore > blueScore
+  } else if (
+    orangeScore >
+    blueScore
   ) {
+
     setText(
       winnerDisplay,
       "ORANGE WINS"
     );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
-  }
+  } else {
 
-  else {
     setText(
       winnerDisplay,
       "DRAW"
     );
-
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#fff";
-    }
   }
 
   setText(
@@ -2446,10 +3650,11 @@ function endMatch(conceded = false) {
 }
 
 /* =========================================================
-   DÉBUT DU MATCH
+   DÉBUT MATCH
 ========================================================= */
 
 function startMatch() {
+
   clearInterval(
     countdownTimer
   );
@@ -2470,26 +3675,43 @@ function startMatch() {
 
   resetPoints();
 
-  boostParticles.length = 0;
-  goalParticles.length = 0;
+  boostParticles.length =
+    0;
 
-  goalFlash = 0;
+  goalParticles.length =
+    0;
 
-  for (const p of boostPads) {
-    p.cooldown = 0;
-    p.flash = 0;
+  goalFlash =
+    0;
+
+  for (
+    const p of boostPads
+  ) {
+
+    p.cooldown =
+      0;
+
+    p.flash =
+      0;
   }
 
-  blueScore = 0;
-  orangeScore = 0;
+  blueScore =
+    0;
 
-  gameTime = 120;
+  orangeScore =
+    0;
 
-  paused = false;
+  gameTime =
+    120;
 
-  gameRunning = true;
+  paused =
+    false;
 
-  goalActive = true;
+  gameRunning =
+    true;
+
+  goalActive =
+    true;
 
   setText(
     blueScoreEl,
@@ -2534,17 +3756,24 @@ function startMatch() {
   );
 
   introTimer =
-    setTimeout(() => {
-      if (!gameRunning) {
-        return;
-      }
+    setTimeout(
+      () => {
 
-      matchIntro?.classList.add(
-        "hidden"
-      );
+        if (
+          !gameRunning
+        ) {
+          return;
+        }
 
-      startCountdown();
-    }, 900);
+        matchIntro?.classList.add(
+          "hidden"
+        );
+
+        startCountdown();
+
+      },
+      900
+    );
 }
 
 /* =========================================================
@@ -2552,6 +3781,7 @@ function startMatch() {
 ========================================================= */
 
 function showMainMenu() {
+
   clearInterval(
     countdownTimer
   );
@@ -2570,11 +3800,14 @@ function showMainMenu() {
 
   clearKeys();
 
-  gameRunning = false;
+  gameRunning =
+    false;
 
-  paused = false;
+  paused =
+    false;
 
-  goalActive = false;
+  goalActive =
+    false;
 
   resetPoints();
 
@@ -2620,6 +3853,7 @@ function showMainMenu() {
 ========================================================= */
 
 function togglePause() {
+
   if (
     !gameRunning ||
     goalActive
@@ -2627,7 +3861,8 @@ function togglePause() {
     return;
   }
 
-  paused = !paused;
+  paused =
+    !paused;
 
   clearKeys();
 
@@ -2637,95 +3872,224 @@ function togglePause() {
   );
 }
 
-$("resumeButton")?.addEventListener(
-  "click",
-  () => {
-    if (!gameRunning) {
-      return;
+$("resumeButton")
+  ?.addEventListener(
+    "click",
+    () => {
+
+      if (
+        !gameRunning
+      ) {
+        return;
+      }
+
+      paused =
+        false;
+
+      clearKeys();
+
+      pauseMenu?.classList.add(
+        "hidden"
+      );
     }
-
-    paused = false;
-
-    clearKeys();
-
-    pauseMenu?.classList.add(
-      "hidden"
-    );
-  }
-);
+  );
 
 /* =========================================================
    ABANDONNER
 ========================================================= */
 
-$("concedeButton")?.addEventListener(
-  "click",
-  () => {
-    if (!gameRunning) {
-      return;
+$("concedeButton")
+  ?.addEventListener(
+    "click",
+    () => {
+
+      if (
+        !gameRunning
+      ) {
+        return;
+      }
+
+      concedeConfirm?.classList.remove(
+        "hidden"
+      );
     }
+  );
 
-    concedeConfirm?.classList.remove(
-      "hidden"
-    );
-  }
-);
+$("cancelConcedeButton")
+  ?.addEventListener(
+    "click",
+    () => {
 
-$("cancelConcedeButton")?.addEventListener(
-  "click",
-  () => {
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
-  }
-);
+      concedeConfirm?.classList.add(
+        "hidden"
+      );
+    }
+  );
 
-$("confirmConcedeButton")?.addEventListener(
-  "click",
-  () => {
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
+$("confirmConcedeButton")
+  ?.addEventListener(
+    "click",
+    () => {
 
-    endMatch(true);
-  }
-);
+      concedeConfirm?.classList.add(
+        "hidden"
+      );
 
-$("pauseMainMenuButton")?.addEventListener(
-  "click",
-  showMainMenu
-);
+      endMatch(
+        true
+      );
+    }
+  );
+
+$("pauseMainMenuButton")
+  ?.addEventListener(
+    "click",
+    showMainMenu
+  );
 
 /* =========================================================
    BOUTONS MENU
 ========================================================= */
 
-$("playButton")?.addEventListener(
-  "click",
-  startMatch
-);
+$("playButton")
+  ?.addEventListener(
+    "click",
+    startMatch
+  );
 
-playAgainButton?.addEventListener(
-  "click",
-  startMatch
-);
+playAgainButton
+  ?.addEventListener(
+    "click",
+    startMatch
+  );
 
-mainMenuButton?.addEventListener(
-  "click",
-  showMainMenu
-);
+mainMenuButton
+  ?.addEventListener(
+    "click",
+    showMainMenu
+  );
 
-$("restartButton")?.addEventListener(
-  "click",
-  startMatch
-);
+$("restartButton")
+  ?.addEventListener(
+    "click",
+    startMatch
+  );
 
 /* =========================================================
-   DESSIN DU TERRAIN
+   POINTS
+========================================================= */
+
+function setText(
+  el,
+  value
+) {
+
+  if (el) {
+    el.textContent =
+      value;
+  }
+}
+
+function updatePoints() {
+
+  setText(
+    playerPointsEl,
+    playerPoints
+  );
+}
+
+function awardPoints(
+  amount,
+  reason
+) {
+
+  playerPoints +=
+    amount;
+
+  updatePoints();
+
+  if (
+    pointsNotification
+  ) {
+
+    clearTimeout(
+      pointsTimer
+    );
+
+    pointsNotification
+      .textContent =
+      `+${amount} ${reason}`;
+
+    pointsNotification
+      .classList.remove(
+        "show"
+      );
+
+    void
+      pointsNotification
+        .offsetWidth;
+
+    pointsNotification
+      .classList.add(
+        "show"
+      );
+
+    pointsTimer =
+      setTimeout(
+        () =>
+          pointsNotification
+            .classList.remove(
+              "show"
+            ),
+        1100
+      );
+  }
+
+  pointsPanel?.classList.remove(
+    "earned"
+  );
+
+  if (
+    pointsPanel
+  ) {
+
+    void
+      pointsPanel
+        .offsetWidth;
+
+    pointsPanel.classList.add(
+      "earned"
+    );
+  }
+}
+
+function resetPoints() {
+
+  playerPoints =
+    0;
+
+  saveCooldown =
+    0;
+
+  saveDangerHandled =
+    false;
+
+  updatePoints();
+
+  pointsNotification
+    ?.classList.remove(
+      "show"
+    );
+}
+
+/* =========================================================
+   DESSIN TERRAIN
 ========================================================= */
 
 function drawArena() {
-  ctx.fillStyle = "#06131f";
+
+  ctx.fillStyle =
+    "#06131f";
 
   ctx.fillRect(
     0,
@@ -2737,17 +4101,26 @@ function drawArena() {
   ctx.strokeStyle =
     "rgba(80,180,255,.08)";
 
-  ctx.lineWidth = 1;
+  ctx.lineWidth =
+    1;
 
   for (
     let x = 0;
     x < W;
     x += 60
   ) {
+
     ctx.beginPath();
 
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, H);
+    ctx.moveTo(
+      x,
+      0
+    );
+
+    ctx.lineTo(
+      x,
+      H
+    );
 
     ctx.stroke();
   }
@@ -2757,10 +4130,18 @@ function drawArena() {
     y < H;
     y += 60
   ) {
+
     ctx.beginPath();
 
-    ctx.moveTo(0, y);
-    ctx.lineTo(W, y);
+    ctx.moveTo(
+      0,
+      y
+    );
+
+    ctx.lineTo(
+      W,
+      y
+    );
 
     ctx.stroke();
   }
@@ -2768,7 +4149,8 @@ function drawArena() {
   ctx.strokeStyle =
     "rgba(120,220,255,.35)";
 
-  ctx.lineWidth = 3;
+  ctx.lineWidth =
+    3;
 
   ctx.strokeRect(
     field.left,
@@ -2822,9 +4204,11 @@ function drawArena() {
 
   /* CAGE BLEUE */
 
-  ctx.lineWidth = 5;
+  ctx.lineWidth =
+    5;
 
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur =
+    18;
 
   ctx.strokeStyle =
     "#18cfff";
@@ -2857,24 +4241,31 @@ function drawArena() {
       goal.top
   );
 
-  ctx.shadowBlur = 0;
+  ctx.shadowBlur =
+    0;
 
   drawBoostPads();
 }
 
 /* =========================================================
-   DESSIN DES BOOSTS
+   BOOST PADS DESSIN
 ========================================================= */
 
 function drawBoostPads() {
-  for (const p of boostPads) {
+
+  for (
+    const p of boostPads
+  ) {
+
     const available =
       p.cooldown <= 0;
 
     const pulse =
       1 +
-      Math.sin(p.pulse) *
-        0.08;
+      Math.sin(
+        p.pulse
+      ) *
+      0.08;
 
     ctx.save();
 
@@ -2886,7 +4277,7 @@ function drawBoostPads() {
     ctx.globalAlpha =
       available
         ? 1
-        : 0.35;
+        : .35;
 
     ctx.shadowColor =
       p.color;
@@ -2933,7 +4324,8 @@ function drawBoostPads() {
     ctx.strokeStyle =
       "#fff";
 
-    ctx.lineWidth = 2;
+    ctx.lineWidth =
+      2;
 
     ctx.beginPath();
 
@@ -2947,14 +4339,18 @@ function drawBoostPads() {
 
     ctx.stroke();
 
-    if (p.flash > 0) {
+    if (
+      p.flash > 0
+    ) {
+
       ctx.globalAlpha =
         p.flash;
 
       ctx.strokeStyle =
         "#fff";
 
-      ctx.lineWidth = 4;
+      ctx.lineWidth =
+        4;
 
       ctx.beginPath();
 
@@ -2962,8 +4358,11 @@ function drawBoostPads() {
         0,
         0,
         32 +
-          (1 - p.flash) *
-            18,
+          (
+            1 -
+            p.flash
+          ) *
+          18,
         0,
         Math.PI * 2
       );
@@ -2983,8 +4382,14 @@ function drawBoostPads() {
    PARTICULES
 ========================================================= */
 
-function drawParticles(list) {
-  for (const p of list) {
+function drawParticles(
+  list
+) {
+
+  for (
+    const p of list
+  ) {
+
     ctx.save();
 
     ctx.globalAlpha =
@@ -3002,7 +4407,8 @@ function drawParticles(list) {
     ctx.shadowColor =
       p.color;
 
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur =
+      12;
 
     ctx.beginPath();
 
@@ -3021,15 +4427,20 @@ function drawParticles(list) {
 }
 
 function drawGoalEffects() {
+
   drawParticles(
     goalParticles
   );
 
-  if (goalFlash > 0) {
+  if (
+    goalFlash > 0
+  ) {
+
     ctx.save();
 
     ctx.globalAlpha =
-      goalFlash * 0.12;
+      goalFlash *
+      .12;
 
     ctx.fillStyle =
       "#fff";
@@ -3050,40 +4461,68 @@ function drawGoalEffects() {
 ========================================================= */
 
 function updateHUD() {
-  if (boostFill) {
+
+  if (
+    boostFill
+  ) {
+
     boostFill.style.width =
       `${player.boost}%`;
   }
 
   setText(
     boostNumber,
-    Math.floor(player.boost)
+    Math.floor(
+      player.boost
+    )
   );
 
-  const s =
-    Math.abs(player.speed);
+  /*
+    Vitesse voiture
+  */
 
-  const kmh =
+  const carSpeed =
+    Math.abs(
+      player.speed
+    );
+
+  const carKmh =
     player.boosting
+
       ? Math.round(
           Math.min(
             83,
-            s *
+            carSpeed *
               (83 / 11.7)
           )
         )
+
       : Math.round(
           Math.min(
             51,
-            s *
+            carSpeed *
               (51 / 7.2)
           )
         );
 
   setText(
     speedNumber,
-    kmh
+    carKmh
   );
+
+  /*
+    Vitesse balle
+  */
+
+  if (
+    ballSpeedNumber
+  ) {
+
+    setText(
+      ballSpeedNumber,
+      `${ball.getSpeedKmh()} KM/H`
+    );
+  }
 }
 
 /* =========================================================
@@ -3097,6 +4536,7 @@ function roundRect(
   h,
   r
 ) {
+
   ctx.beginPath();
 
   ctx.moveTo(
@@ -3159,31 +4599,44 @@ function roundRect(
    GAME LOOP
 ========================================================= */
 
-function gameLoop(now) {
+function gameLoop(
+  now
+) {
+
   const dt =
     Math.min(
-      now - lastTime,
+      now -
+        lastTime,
       100
     );
 
-  lastTime = now;
+  lastTime =
+    now;
 
-  updateEffects(dt);
+  updateEffects(
+    dt
+  );
 
-  updateBoostPads(dt);
+  updateBoostPads(
+    dt
+  );
 
   if (
     gameRunning &&
     !paused &&
     !goalActive
   ) {
+
     player.update();
 
     bot.update();
 
     ball.update();
 
-    if (!goalActive) {
+    if (
+      !goalActive
+    ) {
+
       carBallCollision(
         player
       );
@@ -3197,7 +4650,9 @@ function gameLoop(now) {
         bot
       );
 
-      updateTimer(dt);
+      updateTimer(
+        dt
+      );
     }
   }
 
@@ -3222,7 +4677,9 @@ function gameLoop(now) {
    INITIALISATION
 ========================================================= */
 
-setupDeviceChoice();
+updateGameName();
+
+createBallSpeedHUD();
 
 updateControlUI();
 
@@ -3239,6 +4696,8 @@ player.draw();
 bot.draw();
 
 updateHUD();
+
+createDeviceChoice();
 
 requestAnimationFrame(
   gameLoop
