@@ -1,22 +1,26 @@
 const canvas = document.getElementById("gameCanvas");
 if (!canvas) throw new Error("gameCanvas introuvable");
 
+document.title = "Rocket League.io";
+
+document.querySelectorAll("*").forEach(el => {
+  if (el.childElementCount === 0 && el.textContent) {
+    el.textContent = el.textContent.replace(
+      /TURBOBALL\.IO/gi,
+      "ROCKET LEAGUE.IO"
+    );
+  }
+});
+
 const ctx = canvas.getContext("2d");
 const W = canvas.width;
 const H = canvas.height;
 
 const $ = id => document.getElementById(id);
 
-document.title = "Rocket League.io";
-
-/* =========================================================
-   UI
-========================================================= */
-
 const blueScoreEl = $("blueScore");
 const orangeScoreEl = $("orangeScore");
 const timerEl = $("timer");
-
 const goalMessage = $("goalMessage");
 const goalText = $("goalText");
 const goalScorer = $("goalScorer");
@@ -25,7 +29,6 @@ const countdownEl = $("countdown");
 const pauseMenu = $("pauseMenu");
 const resultScreen = $("resultScreen");
 const winnerDisplay = $("winnerDisplay");
-
 const finalBlueScore = $("finalBlueScore");
 const finalOrangeScore = $("finalOrangeScore");
 
@@ -44,17 +47,11 @@ const boostFill = $("boostFill");
 const boostNumber = $("boostNumber");
 const speedNumber = $("speedNumber");
 
-const ballSpeedEl =
-  $("ballSpeed") ||
-  $("ballSpeedNumber") ||
-  $("speedBallNumber");
-
 const settingsMenu = $("settingsMenu");
 const concedeConfirm = $("concedeConfirm");
 
-
 /* =========================================================
-   CONTRÔLES PC
+   CONTROLES PC
 ========================================================= */
 
 const defaults = {
@@ -72,15 +69,15 @@ try {
     localStorage.getItem("turboball-controls") || "null"
   );
 
-  if (saved) {
-    controls = {
-      ...defaults,
-      ...saved
-    };
+  if (
+    saved &&
+    Object.keys(defaults).every(
+      key => typeof saved[key] === "string"
+    )
+  ) {
+    controls = { ...defaults, ...saved };
   }
 } catch {}
-
-const keys = Object.create(null);
 
 const keyButtons = {
   forward: $("forwardKeyButton"),
@@ -101,12 +98,108 @@ const howButtons = {
 let waitingForAction = null;
 let settingsReturn = "main";
 
-function keyName(key) {
-  if (key === " " || key === "space") {
-    return "SPACE";
-  }
+const keys = Object.create(null);
 
-  return String(key || "").toUpperCase();
+/* =========================================================
+   PC / MOBILE
+========================================================= */
+
+let deviceMode =
+  localStorage.getItem("rocketleague-device-mode") || "pc";
+
+let mobileBoostSide =
+  localStorage.getItem("rocketleague-mobile-boost-side") || "left";
+
+const mobileInput = {
+  x: 0,
+  y: 0,
+  active: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0
+};
+
+let mobileBoostHeld = false;
+let mobileBoostButton = null;
+let mobilePauseButton = null;
+let deviceChooser = null;
+
+function isMobileMode() {
+  return deviceMode === "mobile";
+}
+
+function isPCMode() {
+  return deviceMode !== "mobile";
+}
+
+/* =========================================================
+   VARIABLES DE PARTIE
+========================================================= */
+
+let blueScore = 0;
+let orangeScore = 0;
+
+let playerPoints = 0;
+
+let gameTime = 120;
+
+let gameRunning = false;
+let paused = false;
+let goalActive = false;
+
+let goalTimer = null;
+let countdownTimer = null;
+let countdownFinish = null;
+let introTimer = null;
+
+let lastTime = performance.now();
+
+let pointsTimer = null;
+let saveCooldown = 0;
+let saveDangerHandled = false;
+
+/* =========================================================
+   ONLINE
+========================================================= */
+
+const ONLINE_SERVER_URL =
+  "wss://kyro-io.onrender.com";
+
+let gameMode = "offline";
+
+let socket = null;
+
+let onlineSearching = false;
+let onlineHost = false;
+let onlinePlayerNumber = 0;
+let onlineMatchId = null;
+
+let remoteInput = {
+  forward: false,
+  reverse: false,
+  left: false,
+  right: false,
+  boost: false
+};
+
+let lastNetworkSend = 0;
+let lastHeartbeat = 0;
+
+let lastNetGoalActive = false;
+
+let reconnectTimer = null;
+let searchOverlay = null;
+
+/* =========================================================
+   TOUCHES
+========================================================= */
+
+function keyName(key) {
+  if (key === " ") return "SPACE";
+  if (key === "space") return "SPACE";
+  if (key.length === 1) return key.toUpperCase();
+
+  return key.toUpperCase();
 }
 
 function saveControls() {
@@ -138,90 +231,883 @@ function normalizedKey(e) {
   return e.key.toLowerCase();
 }
 
+/*
+   C'EST CETTE FONCTION QUI ACTIVE RÉELLEMENT
+   LES TOUCHES DE JEU.
+*/
+
 function controlPressed(action) {
+
+  /* MOBILE */
+
+  if (isMobileMode()) {
+
+    if (action === "forward") {
+      return mobileInput.y < -0.18;
+    }
+
+    if (action === "reverse") {
+      return mobileInput.y > 0.18;
+    }
+
+    if (action === "left") {
+      return mobileInput.x < -0.18;
+    }
+
+    if (action === "right") {
+      return mobileInput.x > 0.18;
+    }
+
+    if (action === "boost") {
+      return mobileBoostHeld;
+    }
+  }
+
+  /* PC */
+
   return !!keys[controls[action]];
 }
 
+/* =========================================================
+   VOITURE LOCALE
+========================================================= */
+
+function localCar() {
+
+  if (
+    gameMode === "multiplayer" &&
+    onlinePlayerNumber === 2
+  ) {
+    return bot;
+  }
+
+  return player;
+}
+
+/* =========================================================
+   NETTOYAGE TOUCHES
+========================================================= */
+
 function clearKeys() {
-  for (const k in keys) {
-    keys[k] = false;
+
+  for (const key in keys) {
+    keys[key] = false;
+  }
+
+  mobileInput.x = 0;
+  mobileInput.y = 0;
+  mobileInput.active = false;
+  mobileBoostHeld = false;
+}
+
+/* =========================================================
+   CLAVIER PC
+========================================================= */
+
+document.addEventListener("keydown", e => {
+
+  /*
+     En MOBILE les touches PC ne contrôlent pas la voiture.
+  */
+
+  if (isMobileMode()) {
+    return;
+  }
+
+  /*
+     REMAPPING DES TOUCHES
+  */
+
+  if (waitingForAction) {
+
+    e.preventDefault();
+
+    if (e.key === "Escape") {
+
+      const action =
+        waitingForAction.dataset.action;
+
+      waitingForAction.textContent =
+        keyName(controls[action]);
+
+      waitingForAction = null;
+
+      return;
+    }
+
+    const action =
+      waitingForAction.dataset.action;
+
+    const newKey = normalizedKey(e);
+
+    if (
+      newKey === "" ||
+      newKey === "p" ||
+      newKey === "escape"
+    ) {
+      return;
+    }
+
+    const alreadyUsed =
+      Object.keys(controls).find(
+        other =>
+          other !== action &&
+          controls[other] === newKey
+      );
+
+    if (alreadyUsed) {
+      return;
+    }
+
+    controls[action] = newKey;
+
+    saveControls();
+    updateControlUI();
+
+    waitingForAction = null;
+
+    return;
+  }
+
+  const k = normalizedKey(e);
+
+  /*
+     EMPÊCHE LA PAGE DE SCROLLER AVEC ESPACE
+  */
+
+  if (k === "space") {
+    e.preventDefault();
+  }
+
+  /*
+     P = PAUSE
+  */
+
+  if (
+    gameRunning &&
+    !goalActive &&
+    k === "p"
+  ) {
+    togglePause();
+    return;
+  }
+
+  /*
+     ACTIVATION DE LA TOUCHE
+  */
+
+  keys[k] = true;
+});
+
+document.addEventListener("keyup", e => {
+
+  if (isMobileMode()) {
+    return;
+  }
+
+  const k = normalizedKey(e);
+
+  keys[k] = false;
+});
+
+window.addEventListener("blur", clearKeys);
+
+/* =========================================================
+   BOUTONS REMAPPING
+========================================================= */
+
+for (const action of Object.keys(keyButtons)) {
+
+  keyButtons[action]?.addEventListener(
+    "click",
+    () => {
+
+      if (waitingForAction) {
+        return;
+      }
+
+      waitingForAction =
+        keyButtons[action];
+
+      waitingForAction.dataset.action =
+        action;
+
+      waitingForAction.textContent =
+        "PRESS A KEY";
+    }
+  );
+}
+
+$("resetControlsButton")?.addEventListener(
+  "click",
+  () => {
+
+    controls = { ...defaults };
+
+    saveControls();
+    updateControlUI();
+  }
+);
+
+/* =========================================================
+   SETTINGS
+========================================================= */
+
+$("settingsButton")?.addEventListener(
+  "click",
+  () => openSettings("main")
+);
+
+$("pauseSettingsButton")?.addEventListener(
+  "click",
+  () => openSettings("pause")
+);
+
+function openSettings(from) {
+
+  settingsReturn = from;
+
+  updateMobileSettings();
+
+  mainMenu?.classList.add("hidden");
+  howToPlayMenu?.classList.add("hidden");
+  pauseMenu?.classList.add("hidden");
+
+  settingsMenu?.classList.remove("hidden");
+
+  updateControlUI();
+}
+
+$("settingsBackButton")?.addEventListener(
+  "click",
+  () => {
+
+    settingsMenu?.classList.add("hidden");
+
+    if (
+      settingsReturn === "pause" &&
+      gameRunning
+    ) {
+      pauseMenu?.classList.remove("hidden");
+    } else {
+      mainMenu?.classList.remove("hidden");
+    }
+  }
+);
+
+$("howToPlayButton")?.addEventListener(
+  "click",
+  () => {
+
+    mainMenu?.classList.add("hidden");
+
+    howToPlayMenu?.classList.remove("hidden");
+
+    updateControlUI();
+  }
+);
+
+$("backButton")?.addEventListener(
+  "click",
+  () => {
+
+    howToPlayMenu?.classList.add("hidden");
+
+    mainMenu?.classList.remove("hidden");
+  }
+);
+
+/* =========================================================
+   STYLE + CONTRÔLES MOBILE
+========================================================= */
+
+function addMobileStyles() {
+
+  if ($("mobileControlStyle")) {
+    return;
+  }
+
+  const style =
+    document.createElement("style");
+
+  style.id = "mobileControlStyle";
+
+  style.textContent = `
+
+    #mobileTouchPad {
+      position: fixed;
+      inset: 0;
+      z-index: 9000;
+      background: transparent;
+      touch-action: none;
+      display: none;
+    }
+
+    #mobileBoostButton,
+    #mobilePauseButton {
+      position: fixed;
+      z-index: 9100;
+      color: white;
+      font-weight: 900;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    #mobileBoostButton {
+      bottom: 28px;
+      width: 112px;
+      height: 112px;
+      border-radius: 50%;
+      background: rgba(30,210,255,.18);
+      border: 2px solid rgba(100,235,255,.8);
+      box-shadow:
+        0 0 25px rgba(20,210,255,.45);
+      font-size: 18px;
+    }
+
+    #mobilePauseButton {
+      top: 18px;
+      right: 18px;
+      width: 58px;
+      height: 58px;
+      border-radius: 16px;
+      background: rgba(5,15,25,.78);
+      border: 1px solid rgba(255,255,255,.35);
+      font-size: 18px;
+    }
+
+    #mobileDeviceChooser {
+      position: fixed;
+      inset: 0;
+      z-index: 20000;
+      background: rgba(2,7,14,.98);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-family: Arial,sans-serif;
+      text-align: center;
+    }
+
+    #mobileDeviceChooser .box {
+      width: min(90vw,620px);
+      padding: 34px;
+      border: 1px solid rgba(100,220,255,.35);
+      border-radius: 24px;
+      background: rgba(7,18,30,.96);
+      box-shadow: 0 0 50px rgba(0,180,255,.18);
+    }
+
+    #mobileDeviceChooser h1 {
+      font-size: clamp(28px,6vw,52px);
+      margin: 0 0 12px;
+      font-weight: 1000;
+      letter-spacing: 2px;
+    }
+
+    #mobileDeviceChooser p {
+      opacity: .75;
+      margin: 0 0 26px;
+      font-size: 17px;
+    }
+
+    #mobileDeviceChooser .choices {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    #mobileDeviceChooser button {
+      min-width: 210px;
+      padding: 17px 24px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.22);
+      background: #102335;
+      color: white;
+      font-weight: 900;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    #mobileSettingsPanel {
+      margin: 12px 0;
+      padding: 16px;
+      border: 1px solid rgba(100,220,255,.3);
+      border-radius: 14px;
+      background: rgba(20,40,55,.55);
+      color: white;
+    }
+
+    #mobileSettingsPanel button {
+      padding: 10px 14px;
+      border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.25);
+      background: #132638;
+      color: white;
+      font-weight: 800;
+      margin: 5px;
+      cursor: pointer;
+    }
+
+    #mobileSettingsPanel .selected {
+      outline: 2px solid #4de3ff;
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+/* =========================================================
+   CRÉATION CONTRÔLES MOBILE
+========================================================= */
+
+function createMobileControls() {
+
+  addMobileStyles();
+
+  /* TOUCH PAD */
+
+  if (!$("mobileTouchPad")) {
+
+    const pad =
+      document.createElement("div");
+
+    pad.id = "mobileTouchPad";
+
+    document.body.appendChild(pad);
+
+    pad.addEventListener(
+      "pointerdown",
+      e => {
+
+        if (e.target !== pad) {
+          return;
+        }
+
+        mobileInput.active = true;
+        mobileInput.pointerId = e.pointerId;
+
+        mobileInput.startX = e.clientX;
+        mobileInput.startY = e.clientY;
+
+        mobileInput.x = 0;
+        mobileInput.y = 0;
+
+        pad.setPointerCapture?.(
+          e.pointerId
+        );
+      }
+    );
+
+    pad.addEventListener(
+      "pointermove",
+      e => {
+
+        if (
+          !mobileInput.active ||
+          e.pointerId !== mobileInput.pointerId
+        ) {
+          return;
+        }
+
+        const max = 95;
+
+        mobileInput.x =
+          Math.max(
+            -1,
+            Math.min(
+              1,
+              (e.clientX -
+                mobileInput.startX) /
+                max
+            )
+          );
+
+        mobileInput.y =
+          Math.max(
+            -1,
+            Math.min(
+              1,
+              (e.clientY -
+                mobileInput.startY) /
+                max
+            )
+          );
+      }
+    );
+
+    const endTouch = () => {
+
+      mobileInput.active = false;
+      mobileInput.pointerId = null;
+
+      mobileInput.x = 0;
+      mobileInput.y = 0;
+    };
+
+    pad.addEventListener(
+      "pointerup",
+      endTouch
+    );
+
+    pad.addEventListener(
+      "pointercancel",
+      endTouch
+    );
+  }
+
+  /* BOOST */
+
+  if (!mobileBoostButton) {
+
+    mobileBoostButton =
+      document.createElement("button");
+
+    mobileBoostButton.id =
+      "mobileBoostButton";
+
+    mobileBoostButton.textContent =
+      "BOOST";
+
+    document.body.appendChild(
+      mobileBoostButton
+    );
+
+    const down = e => {
+
+      e.preventDefault();
+
+      mobileBoostHeld = true;
+
+      mobileBoostButton.style.transform =
+        "scale(.94)";
+    };
+
+    const up = e => {
+
+      e.preventDefault();
+
+      mobileBoostHeld = false;
+
+      mobileBoostButton.style.transform =
+        "";
+    };
+
+    mobileBoostButton.addEventListener(
+      "pointerdown",
+      down
+    );
+
+    mobileBoostButton.addEventListener(
+      "pointerup",
+      up
+    );
+
+    mobileBoostButton.addEventListener(
+      "pointercancel",
+      up
+    );
+
+    mobileBoostButton.addEventListener(
+      "pointerleave",
+      up
+    );
+  }
+
+  /* PAUSE */
+
+  if (!mobilePauseButton) {
+
+    mobilePauseButton =
+      document.createElement("button");
+
+    mobilePauseButton.id =
+      "mobilePauseButton";
+
+    mobilePauseButton.textContent =
+      "Ⅱ";
+
+    document.body.appendChild(
+      mobilePauseButton
+    );
+
+    mobilePauseButton.addEventListener(
+      "click",
+      () => togglePause()
+    );
+  }
+
+  positionMobileBoost();
+
+  updateMobileVisibility();
+}
+
+function positionMobileBoost() {
+
+  if (!mobileBoostButton) {
+    return;
+  }
+
+  if (mobileBoostSide === "left") {
+
+    mobileBoostButton.style.left =
+      "22px";
+
+    mobileBoostButton.style.right =
+      "auto";
+
+  } else {
+
+    mobileBoostButton.style.left =
+      "auto";
+
+    mobileBoostButton.style.right =
+      "22px";
   }
 }
 
+function updateMobileVisibility() {
+
+  const show =
+    isMobileMode();
+
+  const active =
+    show &&
+    gameRunning &&
+    !paused;
+
+  const pad =
+    $("mobileTouchPad");
+
+  if (pad) {
+    pad.style.display =
+      active ? "block" : "none";
+  }
+
+  if (mobileBoostButton) {
+    mobileBoostButton.style.display =
+      active ? "block" : "none";
+  }
+
+  if (mobilePauseButton) {
+    mobilePauseButton.style.display =
+      show && gameRunning
+        ? "block"
+        : "none";
+  }
+}
 
 /* =========================================================
-   MODE APPAREIL
+   CHOIX PC / MOBILE
 ========================================================= */
 
-let deviceMode =
-  localStorage.getItem("rocketleague-device-mode") || "pc";
+function showDeviceChooser() {
 
-let mobileMode = deviceMode === "mobile";
+  addMobileStyles();
 
-let mobileBoostSide =
-  localStorage.getItem(
-    "rocketleague-mobile-boost-side"
-  ) || "left";
+  if (deviceChooser) {
+    deviceChooser.remove();
+  }
 
-let mobileBoost = false;
+  deviceChooser =
+    document.createElement("div");
 
-const mobileTouch = {
-  active: false,
-  x: 0,
-  y: 0,
-  cx: 0,
-  cy: 0
-};
+  deviceChooser.id =
+    "mobileDeviceChooser";
 
+  deviceChooser.innerHTML = `
+    <div class="box">
+      <h1>ROCKET LEAGUE.IO</h1>
+      <p>CHOISIS TON APPAREIL POUR JOUER</p>
+
+      <div class="choices">
+        <button id="choosePC">
+          🖥️ PC
+        </button>
+
+        <button id="chooseMobile">
+          📱 MOBILE
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(
+    deviceChooser
+  );
+
+  $("choosePC").onclick =
+    () => selectDevice("pc");
+
+  $("chooseMobile").onclick =
+    () => selectDevice("mobile");
+}
+
+function selectDevice(mode) {
+
+  deviceMode = mode;
+
+  localStorage.setItem(
+    "rocketleague-device-mode",
+    mode
+  );
+
+  deviceChooser?.remove();
+
+  deviceChooser = null;
+
+  createMobileControls();
+
+  updateMobileSettings();
+  updateMobileVisibility();
+}
 
 /* =========================================================
-   MODE JEU / ONLINE
+   SETTINGS MOBILE
 ========================================================= */
 
-let gameMode = "offline";
+function ensureMobileSettings() {
 
-const ONLINE_SERVER_URL =
-  "wss://kyro-io.onrender.com";
+  if (
+    !settingsMenu ||
+    $("mobileSettingsPanel")
+  ) {
+    return;
+  }
 
-let socket = null;
-let onlineConnected = false;
-let onlinePlayerNumber = 0;
-let onlineMatchId = null;
-let isOnlineHost = false;
+  const panel =
+    document.createElement("div");
 
-let opponentInput = {};
+  panel.id =
+    "mobileSettingsPanel";
 
-let networkStateTimer = 0;
+  panel.innerHTML = `
+    <div style="
+      font-weight:900;
+      font-size:18px;
+      margin-bottom:8px;
+    ">
+      📱 CONTRÔLES MOBILE
+    </div>
 
+    <div>
+      POSITION DU BOOST
+    </div>
 
-/* =========================================================
-   ÉTAT DU MATCH
-========================================================= */
+    <button id="boostLeftButton">
+      BOOST À GAUCHE
+    </button>
 
-let blueScore = 0;
-let orangeScore = 0;
+    <button id="boostRightButton">
+      BOOST À DROITE
+    </button>
 
-let playerPoints = 0;
-let opponentPoints = 0;
+    <button id="resetMobileButton">
+      RÉINITIALISER MOBILE
+    </button>
+  `;
 
-let gameTime = 120;
+  settingsMenu.prepend(panel);
 
-let gameRunning = false;
-let paused = false;
-let goalActive = false;
+  $("boostLeftButton").onclick =
+    () => {
 
-let goalTimer = null;
-let countdownTimer = null;
-let countdownFinish = null;
-let introTimer = null;
+      mobileBoostSide = "left";
 
-let lastTime = performance.now();
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "left"
+      );
 
-let pointsTimer = null;
+      positionMobileBoost();
+      updateMobileSettings();
+    };
 
-let saveCooldown = 0;
-let saveDangerHandled = false;
+  $("boostRightButton").onclick =
+    () => {
 
+      mobileBoostSide = "right";
+
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "right"
+      );
+
+      positionMobileBoost();
+      updateMobileSettings();
+    };
+
+  $("resetMobileButton").onclick =
+    () => {
+
+      mobileBoostSide = "left";
+
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "left"
+      );
+
+      positionMobileBoost();
+      updateMobileSettings();
+    };
+}
+
+function updateMobileSettings() {
+
+  ensureMobileSettings();
+
+  const panel =
+    $("mobileSettingsPanel");
+
+  if (!panel) {
+    return;
+  }
+
+  panel.style.display =
+    isMobileMode()
+      ? "block"
+      : "none";
+
+  $("boostLeftButton")
+    ?.classList.toggle(
+      "selected",
+      mobileBoostSide === "left"
+    );
+
+  $("boostRightButton")
+    ?.classList.toggle(
+      "selected",
+      mobileBoostSide === "right"
+    );
+
+  /*
+     EN MOBILE :
+     les boutons de remapping PC sont cachés.
+  */
+
+  for (
+    const button of
+    Object.values(keyButtons)
+  ) {
+
+    if (button) {
+      button.style.display =
+        isMobileMode()
+          ? "none"
+          : "";
+    }
+  }
+
+  if ($("resetControlsButton")) {
+
+    $("resetControlsButton").style.display =
+      isMobileMode()
+        ? "none"
+        : "";
+  }
+}
 
 /* =========================================================
    TERRAIN
@@ -240,12 +1126,22 @@ const goal = {
   depth: 70
 };
 
+const saveZone = {
+  x: field.left + 10,
+  y: goal.top + 12,
+  width: 145,
+  height:
+    goal.bottom -
+    goal.top -
+    24
+};
 
 /* =========================================================
    BOOST PADS
 ========================================================= */
 
 const boostPads = [
+
   {
     x: field.left + 85,
     y: field.top + 85,
@@ -301,82 +1197,14 @@ const boostPads = [
   }
 ];
 
-
-/* =========================================================
-   PARTICULES
-========================================================= */
-
 const boostParticles = [];
 const goalParticles = [];
-const demoParticles = [];
+const demolitionParticles = [];
 
 let goalFlash = 0;
-let demoFlash = 0;
-
 
 /* =========================================================
-   POINTS
-========================================================= */
-
-function setText(element, value) {
-  if (element) {
-    element.textContent = value;
-  }
-}
-
-function updatePoints() {
-  setText(playerPointsEl, playerPoints);
-}
-
-function awardPoints(amount, reason) {
-  playerPoints += amount;
-
-  updatePoints();
-
-  if (pointsNotification) {
-    clearTimeout(pointsTimer);
-
-    pointsNotification.textContent =
-      `+${amount} ${reason}`;
-
-    pointsNotification.classList.remove("show");
-
-    void pointsNotification.offsetWidth;
-
-    pointsNotification.classList.add("show");
-
-    pointsTimer = setTimeout(() => {
-      pointsNotification.classList.remove("show");
-    }, 1100);
-  }
-
-  pointsPanel?.classList.remove("earned");
-
-  if (pointsPanel) {
-    void pointsPanel.offsetWidth;
-    pointsPanel.classList.add("earned");
-  }
-}
-
-function awardOpponentPoints(amount) {
-  opponentPoints += amount;
-}
-
-function resetPoints() {
-  playerPoints = 0;
-  opponentPoints = 0;
-
-  saveCooldown = 0;
-  saveDangerHandled = false;
-
-  updatePoints();
-
-  pointsNotification?.classList.remove("show");
-}
-
-
-/* =========================================================
-   CLASSES
+   VOITURE
 ========================================================= */
 
 class Car {
@@ -387,7 +1215,6 @@ class Car {
     this.startY = y;
 
     this.color = color;
-
     this.isBot = bot;
 
     this.radius = 25;
@@ -395,15 +1222,13 @@ class Car {
     this.x = x;
     this.y = y;
 
-    this.angle = bot ? Math.PI : 0;
+    this.angle =
+      bot ? Math.PI : 0;
 
     this.speed = 0;
 
-    /*
-      7.2 = environ 51 km/h
-      11.7 = environ 83 km/h
-    */
     this.maxSpeed = 7.2;
+
     this.boostMax = 11.7;
 
     this.boost = 100;
@@ -415,20 +1240,22 @@ class Car {
     this.aiTarget = null;
     this.aiThink = 0;
 
+    /* DÉMOLITION */
+
     this.demolished = false;
     this.demoTimer = 0;
     this.demoCooldown = 0;
   }
-
 
   reset() {
 
     this.x = this.startX;
     this.y = this.startY;
 
-    this.angle = this.isBot
-      ? Math.PI
-      : 0;
+    this.angle =
+      this.isBot
+        ? Math.PI
+        : 0;
 
     this.speed = 0;
 
@@ -442,14 +1269,28 @@ class Car {
 
     this.demolished = false;
     this.demoTimer = 0;
+    this.demoCooldown = 0;
   }
 
+  update() {
 
-  update(dt) {
+    if (this.demoCooldown > 0) {
+
+      this.demoCooldown =
+        Math.max(
+          0,
+          this.demoCooldown -
+            1 / 60
+        );
+    }
+
+    /*
+       VOITURE DÉTRUITE
+    */
 
     if (this.demolished) {
 
-      this.demoTimer -= dt / 1000;
+      this.demoTimer -= 1 / 60;
 
       if (this.demoTimer <= 0) {
         this.reset();
@@ -464,23 +1305,13 @@ class Car {
       this.updatePlayer();
     }
 
-    this.move();
-
-    this.demoCooldown =
-      Math.max(
-        0,
-        this.demoCooldown - dt / 1000
-      );
-  }
-
-
-  move() {
-
     this.x +=
-      Math.cos(this.angle) * this.speed;
+      Math.cos(this.angle) *
+      this.speed;
 
     this.y +=
-      Math.sin(this.angle) * this.speed;
+      Math.sin(this.angle) *
+      this.speed;
 
     this.speed *= 0.985;
 
@@ -497,107 +1328,67 @@ class Car {
       );
   }
 
+  /* =====================================================
+     CONTRÔLES DU JOUEUR
+  ===================================================== */
 
   updatePlayer() {
 
     this.boosting = false;
 
-    if (mobileMode) {
+    /*
+       Z = AVANCER
+    */
 
-      const dx =
-        mobileTouch.x -
-        mobileTouch.cx;
+    if (controlPressed("forward")) {
+      this.speed += 0.18;
+    }
 
-      const dy =
-        mobileTouch.y -
-        mobileTouch.cy;
+    /*
+       S = RECULER
+    */
 
-      const distance =
-        Math.hypot(dx, dy);
+    if (controlPressed("reverse")) {
 
-      if (
-        mobileTouch.active &&
-        distance > 8
-      ) {
-
-        const targetAngle =
-          Math.atan2(dy, dx);
-
-        let diff =
-          targetAngle -
-          this.angle;
-
-        while (diff > Math.PI) {
-          diff -= Math.PI * 2;
-        }
-
-        while (diff < -Math.PI) {
-          diff += Math.PI * 2;
-        }
-
-        this.angle +=
-          Math.max(
-            -0.09,
-            Math.min(
-              0.09,
-              diff
-            )
-          );
-
-        this.speed +=
-          Math.min(
-            0.22,
-            distance * 0.0028
-          );
-
-        if (distance > 35) {
-          this.speed += 0.04;
-        }
-      }
-
-    } else {
-
-      if (controlPressed("forward")) {
-        this.speed += 0.18;
-      }
-
-      if (controlPressed("reverse")) {
-
-        if (this.speed > 0) {
-          this.speed -= 0.25;
-        } else {
-          this.speed -= 0.12;
-        }
-      }
-
-      const turn =
-        0.055 *
-        Math.min(
-          Math.abs(this.speed) / 2 + 0.3,
-          1
-        );
-
-      if (controlPressed("left")) {
-        this.angle -=
-          turn *
-          (this.speed >= 0 ? 1 : -1);
-      }
-
-      if (controlPressed("right")) {
-        this.angle +=
-          turn *
-          (this.speed >= 0 ? 1 : -1);
+      if (this.speed > 0) {
+        this.speed -= 0.25;
+      } else {
+        this.speed -= 0.12;
       }
     }
 
+    /*
+       Q = GAUCHE
+       D = DROITE
+    */
 
-    const boostPressed =
-      controlPressed("boost") ||
-      mobileBoost;
+    const turn =
+      0.055 *
+      Math.min(
+        Math.abs(this.speed) / 2 + 0.3,
+        1
+      );
 
+    if (controlPressed("left")) {
+
+      this.angle -=
+        turn *
+        (this.speed >= 0 ? 1 : -1);
+    }
+
+    if (controlPressed("right")) {
+
+      this.angle +=
+        turn *
+        (this.speed >= 0 ? 1 : -1);
+    }
+
+    /*
+       ESPACE = BOOST
+    */
 
     if (
-      boostPressed &&
+      controlPressed("boost") &&
       this.boost > 0 &&
       this.speed > 0
     ) {
@@ -608,7 +1399,6 @@ class Car {
 
       this.boosting = true;
     }
-
 
     this.speed =
       Math.max(
@@ -622,8 +1412,15 @@ class Car {
       );
   }
 
+  /* =====================================================
+     JOUEUR DISTANT
+  ===================================================== */
 
-  updateFromNetworkInput(input) {
+  updateRemote(input) {
+
+    if (this.demolished) {
+      return;
+    }
 
     this.boosting = false;
 
@@ -682,36 +1479,38 @@ class Car {
             : this.maxSpeed
         )
       );
-
-    this.move();
   }
 
+  /* =====================================================
+     IA
+  ===================================================== */
 
   updateAI() {
 
-    const dx =
+    const dxBall =
       ball.x - this.x;
 
-    const dy =
+    const dyBall =
       ball.y - this.y;
 
-    const dist =
-      Math.hypot(dx, dy);
+    const distBall =
+      Math.hypot(
+        dxBall,
+        dyBall
+      );
 
     let tx = ball.x;
     let ty = ball.y;
 
-    const dangerous =
-      ball.x >
-        field.right - 270 &&
-      ball.vx > 0;
-
-
     /*
-      Défense
+       DÉFENSE
     */
 
-    if (dangerous) {
+    if (
+      ball.x >
+        field.right - 270 &&
+      ball.vx > 0
+    ) {
 
       tx =
         Math.min(
@@ -721,29 +1520,30 @@ class Car {
 
       ty =
         H / 2 +
-        (ball.y - H / 2) *
-        0.7;
+        (ball.y - H / 2) * 0.7;
 
-    } else if (ball.x < W * 0.42) {
-
-      /*
-        Attaque
-      */
+    } else if (
+      ball.x < W * 0.42
+    ) {
 
       tx = ball.x + 45;
       ty = ball.y;
     }
 
+    this.aiThink -= 1 / 60;
+
+    const dangerous =
+      ball.x >
+        field.right - 270 &&
+      ball.vx > 0;
 
     /*
-      Recherche de boost
+       CHERCHE UN BOOST
     */
-
-    this.aiThink -= 1 / 60;
 
     if (
       this.boost < 25 &&
-      dist > 180 &&
+      distBall > 180 &&
       !dangerous
     ) {
 
@@ -769,6 +1569,7 @@ class Car {
             );
 
           if (d < bestD) {
+
             bestD = d;
             best = pad;
           }
@@ -779,6 +1580,7 @@ class Car {
       }
 
       if (this.aiTarget) {
+
         tx = this.aiTarget.x;
         ty = this.aiTarget.y;
       }
@@ -790,11 +1592,6 @@ class Car {
 
       this.aiTarget = null;
     }
-
-
-    /*
-      Direction
-    */
 
     const targetAngle =
       Math.atan2(
@@ -814,7 +1611,6 @@ class Car {
       diff += Math.PI * 2;
     }
 
-
     const turn = 0.062;
 
     if (diff > 0.06) {
@@ -823,7 +1619,6 @@ class Car {
       this.angle -= turn;
     }
 
-
     const aligned =
       Math.abs(diff) < 0.32;
 
@@ -831,21 +1626,14 @@ class Car {
       ball.x < W * 0.55 &&
       this.x > ball.x;
 
-
-    /*
-      IA utilise le boost
-      jusqu'à 10.2
-    */
-
     this.boosting =
       this.boost > 4 &&
       aligned &&
       (
-        dist > 260 ||
+        distBall > 260 ||
         attack ||
         !!this.aiTarget
       );
-
 
     this.speed +=
       this.boosting
@@ -856,6 +1644,10 @@ class Car {
       this.boost -= 0.55;
     }
 
+    /*
+       IA BOOST MAX = 10.2
+       donc peut aussi démolir.
+    */
 
     this.speed =
       Math.min(
@@ -865,64 +1657,86 @@ class Car {
           : 6.7
       );
 
+    if (this.aiTarget) {
 
-    /*
-      Ramassage boost
-    */
-
-    if (
-      this.aiTarget &&
-      Math.hypot(
-        this.aiTarget.x - this.x,
-        this.aiTarget.y - this.y
-      ) <
-        this.radius + 22 &&
-      this.aiTarget.cooldown <= 0
-    ) {
-
-      this.boost =
-        Math.min(
-          100,
-          this.boost + 25
+      const d =
+        Math.hypot(
+          this.aiTarget.x - this.x,
+          this.aiTarget.y - this.y
         );
 
-      this.aiTarget.cooldown = 5;
-      this.aiTarget.flash = 1;
+      if (
+        d <
+          this.radius + 22 &&
+        this.aiTarget.cooldown <= 0
+      ) {
 
-      spawnPadParticles(
-        this.aiTarget
-      );
+        this.boost =
+          Math.min(
+            100,
+            this.boost + 25
+          );
 
-      this.aiTarget = null;
+        this.aiTarget.cooldown = 5;
+        this.aiTarget.flash = 1;
+
+        spawnPadParticles(
+          this.aiTarget
+        );
+
+        this.aiTarget = null;
+      }
     }
   }
-
 
   keepInside() {
 
     const r = this.radius;
 
-    if (this.x < field.left + r) {
-      this.x = field.left + r;
+    if (
+      this.x <
+      field.left + r
+    ) {
+
+      this.x =
+        field.left + r;
+
       this.speed *= -0.3;
     }
 
-    if (this.x > field.right - r) {
-      this.x = field.right - r;
+    if (
+      this.x >
+      field.right - r
+    ) {
+
+      this.x =
+        field.right - r;
+
       this.speed *= -0.3;
     }
 
-    if (this.y < field.top + r) {
-      this.y = field.top + r;
+    if (
+      this.y <
+      field.top + r
+    ) {
+
+      this.y =
+        field.top + r;
+
       this.speed *= -0.3;
     }
 
-    if (this.y > field.bottom - r) {
-      this.y = field.bottom - r;
+    if (
+      this.y >
+      field.bottom - r
+    ) {
+
+      this.y =
+        field.bottom - r;
+
       this.speed *= -0.3;
     }
   }
-
 
   draw() {
 
@@ -937,12 +1751,9 @@ class Car {
       this.y
     );
 
-    ctx.rotate(this.angle);
-
-
-    /*
-      Boost
-    */
+    ctx.rotate(
+      this.angle
+    );
 
     if (this.boosting) {
 
@@ -951,22 +1762,24 @@ class Car {
 
       ctx.beginPath();
 
-      ctx.moveTo(-35, -11);
+      ctx.moveTo(
+        -35,
+        -11
+      );
 
       ctx.lineTo(
-        -65 - Math.random() * 18,
+        -65 -
+          Math.random() * 18,
         0
       );
 
-      ctx.lineTo(-35, 11);
+      ctx.lineTo(
+        -35,
+        11
+      );
 
       ctx.fill();
     }
-
-
-    /*
-      Voiture
-    */
 
     ctx.shadowColor =
       this.color;
@@ -986,7 +1799,6 @@ class Car {
 
     ctx.fill();
 
-
     ctx.shadowBlur = 0;
 
     ctx.fillStyle =
@@ -1001,7 +1813,6 @@ class Car {
     );
 
     ctx.fill();
-
 
     ctx.fillStyle = "#fff";
 
@@ -1018,11 +1829,6 @@ class Car {
       5,
       7
     );
-
-
-    /*
-      Roues
-    */
 
     ctx.fillStyle =
       "#05070b";
@@ -1059,7 +1865,6 @@ class Car {
   }
 }
 
-
 /* =========================================================
    BALLE
 ========================================================= */
@@ -1073,7 +1878,6 @@ class Ball {
     this.reset();
   }
 
-
   reset() {
 
     this.x = W / 2;
@@ -1083,7 +1887,6 @@ class Ball {
     this.vy = 0;
   }
 
-
   update() {
 
     this.x += this.vx;
@@ -1092,17 +1895,16 @@ class Ball {
     this.vx *= 0.992;
     this.vy *= 0.992;
 
-
-    /*
-      Vitesse max interne :
-      9 = 216 km/h
-    */
-
     const speed =
       Math.hypot(
         this.vx,
         this.vy
       );
+
+    /*
+       MAX BALLE = 216 KM/H
+       9 unités = 216 km/h
+    */
 
     if (speed > 9) {
 
@@ -1113,7 +1915,6 @@ class Ball {
         this.vy / speed * 9;
     }
 
-
     this.checkGoal();
 
     if (!goalActive) {
@@ -1121,17 +1922,17 @@ class Ball {
     }
   }
 
-
   checkGoal() {
 
     const inOpening =
-      this.y + this.radius > goal.top &&
-      this.y - this.radius < goal.bottom;
+      this.y + this.radius >
+        goal.top &&
+      this.y - this.radius <
+        goal.bottom;
 
     if (!inOpening) {
       return;
     }
-
 
     if (
       this.x - this.radius <=
@@ -1149,7 +1950,6 @@ class Ball {
     }
   }
 
-
   walls() {
 
     if (
@@ -1158,11 +1958,11 @@ class Ball {
     ) {
 
       this.y =
-        field.top + this.radius;
+        field.top +
+        this.radius;
 
       this.vy *= -0.82;
     }
-
 
     if (
       this.y + this.radius >
@@ -1170,16 +1970,17 @@ class Ball {
     ) {
 
       this.y =
-        field.bottom - this.radius;
+        field.bottom -
+        this.radius;
 
       this.vy *= -0.82;
     }
 
-
     const inOpening =
-      this.y + this.radius > goal.top &&
-      this.y - this.radius < goal.bottom;
-
+      this.y + this.radius >
+        goal.top &&
+      this.y - this.radius <
+        goal.bottom;
 
     if (
       this.x - this.radius <
@@ -1188,11 +1989,11 @@ class Ball {
     ) {
 
       this.x =
-        field.left + this.radius;
+        field.left +
+        this.radius;
 
       this.vx *= -0.82;
     }
-
 
     if (
       this.x + this.radius >
@@ -1201,15 +2002,11 @@ class Ball {
     ) {
 
       this.x =
-        field.right - this.radius;
+        field.right -
+        this.radius;
 
       this.vx *= -0.82;
     }
-
-
-    /*
-      Fond des cages
-    */
 
     if (
       inOpening &&
@@ -1226,7 +2023,6 @@ class Ball {
 
       this.vx *= -0.82;
     }
-
 
     if (
       inOpening &&
@@ -1245,7 +2041,6 @@ class Ball {
     }
   }
 
-
   draw() {
 
     ctx.save();
@@ -1253,7 +2048,7 @@ class Ball {
     ctx.shadowColor = "#fff";
     ctx.shadowBlur = 18;
 
-    const g =
+    const gradient =
       ctx.createRadialGradient(
         this.x - 6,
         this.y - 7,
@@ -1263,22 +2058,23 @@ class Ball {
         this.radius
       );
 
-    g.addColorStop(
+    gradient.addColorStop(
       0,
       "#fff"
     );
 
-    g.addColorStop(
-      0.55,
+    gradient.addColorStop(
+      .55,
       "#dce7f0"
     );
 
-    g.addColorStop(
+    gradient.addColorStop(
       1,
       "#7d91a3"
     );
 
-    ctx.fillStyle = g;
+    ctx.fillStyle =
+      gradient;
 
     ctx.beginPath();
 
@@ -1295,7 +2091,6 @@ class Ball {
     ctx.restore();
   }
 }
-
 
 /* =========================================================
    OBJETS
@@ -1316,117 +2111,97 @@ const bot =
     true
   );
 
-const ball = new Ball();
-
-
-/* =========================================================
-   JOUEUR LOCAL
-========================================================= */
-
-function localCar() {
-
-  if (
-    gameMode === "multiplayer" &&
-    onlinePlayerNumber === 2
-  ) {
-    return bot;
-  }
-
-  return player;
-}
-
-function localTeam() {
-
-  if (
-    gameMode === "multiplayer" &&
-    onlinePlayerNumber === 2
-  ) {
-    return "orange";
-  }
-
-  return "blue";
-}
-
+const ball =
+  new Ball();
 
 /* =========================================================
    SAVE
 ========================================================= */
 
-function saveZoneFor(team) {
-
-  if (team === "blue") {
-
-    return {
-      x: field.left + 10,
-      y: goal.top + 12,
-      width: 145,
-      height:
-        goal.bottom -
-        goal.top -
-        24
-    };
-  }
-
-  return {
-    x: field.right - 155,
-    y: goal.top + 12,
-    width: 145,
-    height:
-      goal.bottom -
-      goal.top -
-      24
-  };
-}
-
-
-function carInSaveZone(car, team) {
-
-  const z =
-    saveZoneFor(team);
+function carInSaveZone(car) {
 
   return (
-    car.x >= z.x &&
-    car.x <= z.x + z.width &&
-    car.y >= z.y &&
-    car.y <= z.y + z.height
+    car.x >= saveZone.x &&
+    car.x <=
+      saveZone.x +
+      saveZone.width &&
+    car.y >= saveZone.y &&
+    car.y <=
+      saveZone.y +
+      saveZone.height
   );
 }
 
+function playerInSaveZone() {
 
-function ballDangerousFor(team) {
+  const car =
+    localCar();
+
+  /*
+     Zone bleue
+  */
+
+  if (
+    car.color === "#20cfff"
+  ) {
+
+    return carInSaveZone(car);
+  }
+
+  /*
+     Zone orange
+  */
+
+  return (
+    car.x >=
+      field.right - 155 &&
+    car.x <=
+      field.right - 10 &&
+    car.y >= saveZone.y &&
+    car.y <=
+      saveZone.y +
+      saveZone.height
+  );
+}
+
+function ballDangerous() {
 
   const inLane =
-    ball.y + ball.radius > goal.top &&
-    ball.y - ball.radius < goal.bottom;
+    ball.y + ball.radius >
+      goal.top &&
+    ball.y - ball.radius <
+      goal.bottom;
 
+  const car =
+    localCar();
 
-  if (team === "blue") {
+  if (
+    car.color === "#ff8a18"
+  ) {
 
     return (
       inLane &&
-      ball.x <
-        field.left + 250 &&
+      ball.x >
+        field.right - 250 &&
       (
-        ball.vx < -0.1 ||
-        ball.x <
-          field.left + 105
+        ball.vx > 0.1 ||
+        ball.x >
+          field.right - 105
       )
     );
   }
 
-
   return (
     inLane &&
-    ball.x >
-      field.right - 250 &&
+    ball.x <
+      field.left + 250 &&
     (
-      ball.vx > 0.1 ||
-      ball.x >
-        field.right - 105
+      ball.vx < -0.1 ||
+      ball.x <
+        field.left + 105
     )
   );
 }
-
 
 /* =========================================================
    COLLISION BALLE
@@ -1451,7 +2226,6 @@ function carBallCollision(car) {
     car.radius +
     ball.radius;
 
-
   if (d >= minD) {
 
     car.ballContact = false;
@@ -1459,42 +2233,32 @@ function carBallCollision(car) {
     return;
   }
 
-
-  const team =
-    car === player
-      ? "blue"
-      : "orange";
+  const isLocal =
+    car === localCar();
 
   const dangerousBefore =
-    ballDangerousFor(team);
+    isLocal &&
+    ballDangerous();
 
   const newContact =
     !car.ballContact;
 
   car.ballContact = true;
 
-
   /*
-    Points contact
+     +2 PAR CONTACT
   */
 
-  if (newContact) {
+  if (
+    isLocal &&
+    newContact
+  ) {
 
-    if (car === localCar()) {
-
-      awardPoints(
-        2,
-        "BALL TOUCH"
-      );
-
-    } else if (
-      gameMode === "multiplayer"
-    ) {
-
-      awardOpponentPoints(2);
-    }
+    awardPoints(
+      2,
+      "BALL TOUCH"
+    );
   }
-
 
   const safeD =
     d || 0.001;
@@ -1508,23 +2272,23 @@ function carBallCollision(car) {
   const overlap =
     minD - d;
 
+  ball.x +=
+    nx * overlap;
 
-  ball.x += nx * overlap;
-  ball.y += ny * overlap;
-
+  ball.y +=
+    ny * overlap;
 
   const force =
     Math.min(
-      Math.abs(car.speed) *
-        1.15 +
-        1.2,
+      Math.abs(car.speed) * 1.15 + 1.2,
       7
     );
 
+  ball.vx +=
+    nx * force;
 
-  ball.vx += nx * force;
-  ball.vy += ny * force;
-
+  ball.vy +=
+    ny * force;
 
   ball.vx +=
     Math.cos(car.angle) *
@@ -1536,22 +2300,17 @@ function carBallCollision(car) {
     Math.abs(car.speed) *
     0.25;
 
-
   car.speed *= 0.82;
 
-
   /*
-    SAVE
+     SAVE
   */
 
   if (
-    car === localCar() &&
+    isLocal &&
     newContact &&
     dangerousBefore &&
-    carInSaveZone(
-      car,
-      team
-    ) &&
+    playerInSaveZone() &&
     saveCooldown <= 0
   ) {
 
@@ -1559,27 +2318,13 @@ function carBallCollision(car) {
 
     saveDangerHandled = true;
 
-
-    if (team === "blue") {
-
-      ball.vx =
-        Math.max(
-          1.8,
-          Math.abs(ball.vx) * 0.65
-        );
-
-    } else {
-
-      ball.vx =
-        -Math.max(
-          1.8,
-          Math.abs(ball.vx) * 0.65
-        );
-    }
-
+    ball.vx =
+      Math.max(
+        1.8,
+        Math.abs(ball.vx) * 0.65
+      );
 
     ball.vy *= 0.65;
-
 
     awardPoints(
       50,
@@ -1588,86 +2333,103 @@ function carBallCollision(car) {
   }
 }
 
-
 /* =========================================================
    DÉMOLITIONS
 ========================================================= */
 
-function demolish(attacker, victim) {
+function spawnDemolition(car) {
+
+  for (let i = 0; i < 38; i++) {
+
+    const angle =
+      Math.random() *
+      Math.PI *
+      2;
+
+    const speed =
+      2 +
+      Math.random() * 5;
+
+    demolitionParticles.push({
+
+      x: car.x,
+      y: car.y,
+
+      vx:
+        Math.cos(angle) *
+        speed,
+
+      vy:
+        Math.sin(angle) *
+        speed,
+
+      life:
+        0.8 +
+        Math.random() * 0.5,
+
+      size:
+        2 +
+        Math.random() * 5,
+
+      color:
+        car.color
+    });
+  }
+}
+
+function demolishCar(
+  attacker,
+  victim
+) {
 
   if (
-    attacker.demolished ||
-    victim.demolished
+    victim.demolished ||
+    attacker.demolished
   ) {
     return;
   }
 
-
   if (
-    attacker.demoCooldown > 0
+    attacker.demoCooldown > 0 ||
+    victim.demoCooldown > 0
   ) {
     return;
   }
-
 
   /*
-    70 km/h minimum.
-
-    11.7 = 83 km/h
-    70 km/h = environ 9.86
+     70 KM/H MINIMUM
   */
 
-  const demolitionSpeed =
-    70 * (11.7 / 83);
+  const attackerKmh =
+    Math.abs(attacker.speed) *
+    (83 / 11.7);
 
-
-  if (
-    Math.abs(attacker.speed) <
-    demolitionSpeed
-  ) {
+  if (attackerKmh < 70) {
     return;
   }
-
-
-  const distance =
-    Math.hypot(
-      victim.x - attacker.x,
-      victim.y - attacker.y
-    );
-
-
-  if (
-    distance >
-    attacker.radius +
-    victim.radius +
-    3
-  ) {
-    return;
-  }
-
 
   /*
-    SEULEMENT L'ADVERSAIRE
-    est démoli.
+     SEUL L'ADVERSAIRE EST DÉMOLI
   */
 
   victim.demolished = true;
 
-  victim.demoTimer = 2.0;
+  victim.demoTimer = 1.15;
+
+  victim.demoCooldown = 1.5;
 
   victim.speed = 0;
 
-  spawnDemo(
-    victim.x,
-    victim.y,
-    attacker.color
-  );
+  victim.boosting = false;
 
-  attacker.demoCooldown = 1.1;
+  attacker.demoCooldown = 0.65;
 
-  demoFlash = 1;
+  spawnDemolition(victim);
 }
 
+/* =========================================================
+   COLLISION VOITURES
+========================================================= */
 
 function carCarCollision(a, b) {
 
@@ -1677,7 +2439,6 @@ function carCarCollision(a, b) {
   ) {
     return;
   }
-
 
   const dx =
     b.x - a.x;
@@ -1692,7 +2453,6 @@ function carCarCollision(a, b) {
     a.radius +
     b.radius;
 
-
   if (
     d <= 0 ||
     d >= minD
@@ -1700,46 +2460,14 @@ function carCarCollision(a, b) {
     return;
   }
 
+  const nx =
+    dx / d;
 
-  /*
-    Démolition dans les deux sens :
-    joueur -> IA
-    IA -> joueur
-    joueur online -> adversaire
-  */
-
-  if (
-    Math.abs(a.speed) >=
-    70 * (11.7 / 83)
-  ) {
-
-    demolish(a, b);
-  }
-
-
-  if (
-    Math.abs(b.speed) >=
-    70 * (11.7 / 83)
-  ) {
-
-    demolish(b, a);
-  }
-
-
-  if (
-    a.demolished ||
-    b.demolished
-  ) {
-    return;
-  }
-
-
-  const nx = dx / d;
-  const ny = dy / d;
+  const ny =
+    dy / d;
 
   const overlap =
     minD - d;
-
 
   a.x -=
     nx * overlap / 2;
@@ -1753,8 +2481,26 @@ function carCarCollision(a, b) {
   b.y +=
     ny * overlap / 2;
 
-
   const av = a.speed;
+  const bv = b.speed;
+
+  /*
+     DÉMOLITION
+  */
+
+  if (
+    Math.abs(av) *
+      (83 / 11.7) >= 70
+  ) {
+    demolishCar(a, b);
+  }
+
+  if (
+    Math.abs(bv) *
+      (83 / 11.7) >= 70
+  ) {
+    demolishCar(b, a);
+  }
 
   a.speed =
     b.speed * 0.55;
@@ -1762,14 +2508,12 @@ function carCarCollision(a, b) {
   b.speed =
     av * 0.55;
 
-
   a.keepInside();
   b.keepInside();
 }
 
-
 /* =========================================================
-   PARTICULES
+   PARTICULES BOOST
 ========================================================= */
 
 function spawnPadParticles(pad) {
@@ -1783,8 +2527,8 @@ function spawnPadParticles(pad) {
       1.2 +
       Math.random() * 1.4;
 
-
     boostParticles.push({
+
       x: pad.x,
       y: pad.y,
 
@@ -1802,11 +2546,11 @@ function spawnPadParticles(pad) {
         2 +
         Math.random() * 2,
 
-      color: pad.color
+      color:
+        pad.color
     });
   }
 }
-
 
 function spawnGoalParticles(team) {
 
@@ -1814,7 +2558,6 @@ function spawnGoalParticles(team) {
     team === "blue"
       ? "#43d9ff"
       : "#ff9d2e";
-
 
   for (let i = 0; i < 32; i++) {
 
@@ -1825,9 +2568,7 @@ function spawnGoalParticles(team) {
 
     const speed =
       1.5 +
-      Math.random() *
-      3.5;
-
+      Math.random() * 3.5;
 
     goalParticles.push({
 
@@ -1853,54 +2594,9 @@ function spawnGoalParticles(team) {
   }
 }
 
-
-function spawnDemo(
-  x,
-  y,
-  color
-) {
-
-  for (let i = 0; i < 55; i++) {
-
-    const angle =
-      Math.random() *
-      Math.PI *
-      2;
-
-    const speed =
-      2 +
-      Math.random() *
-      5;
-
-
-    demoParticles.push({
-
-      x,
-      y,
-
-      vx:
-        Math.cos(angle) *
-        speed,
-
-      vy:
-        Math.sin(angle) *
-        speed,
-
-      life:
-        0.8 +
-        Math.random() *
-        0.7,
-
-      size:
-        2 +
-        Math.random() *
-        5,
-
-      color
-    });
-  }
-}
-
+/* =========================================================
+   EFFETS
+========================================================= */
 
 function updateEffects(dt) {
 
@@ -1910,42 +2606,34 @@ function updateEffects(dt) {
       0.1
     );
 
-
   goalFlash =
     Math.max(
       0,
       goalFlash -
-      sec * 2.2
+        sec * 2.2
     );
-
-
-  demoFlash =
-    Math.max(
-      0,
-      demoFlash -
-      sec * 3
-    );
-
 
   for (
     const list of [
       boostParticles,
       goalParticles,
-      demoParticles
+      demolitionParticles
     ]
   ) {
 
-    for (const p of list) {
+    for (const particle of list) {
 
-      p.x += p.vx;
-      p.y += p.vy;
+      particle.x +=
+        particle.vx;
 
-      p.vx *= 0.97;
-      p.vy *= 0.97;
+      particle.y +=
+        particle.vy;
 
-      p.life -= sec;
+      particle.vx *= 0.97;
+      particle.vy *= 0.97;
+
+      particle.life -= sec;
     }
-
 
     for (
       let i = list.length - 1;
@@ -1956,12 +2644,10 @@ function updateEffects(dt) {
       if (
         list[i].life <= 0
       ) {
-
         list.splice(i, 1);
       }
     }
   }
-
 
   saveCooldown =
     Math.max(
@@ -1969,17 +2655,10 @@ function updateEffects(dt) {
       saveCooldown - sec
     );
 
-
-  if (
-    !ballDangerousFor(
-      localTeam()
-    )
-  ) {
-
+  if (!ballDangerous()) {
     saveDangerHandled = false;
   }
 }
-
 
 /* =========================================================
    BOOST PADS
@@ -1992,7 +2671,6 @@ function updateBoostPads(dt) {
       dt / 1000,
       0.1
     );
-
 
   for (const pad of boostPads) {
 
@@ -2008,11 +2686,9 @@ function updateBoostPads(dt) {
     pad.flash =
       Math.max(
         0,
-        pad.flash -
-        sec * 2.5
+        pad.flash - sec * 2.5
       );
   }
-
 
   if (
     !gameRunning ||
@@ -2022,6 +2698,10 @@ function updateBoostPads(dt) {
     return;
   }
 
+  const cars =
+    gameMode === "multiplayer"
+      ? [player, bot]
+      : [localCar()];
 
   for (const pad of boostPads) {
 
@@ -2029,18 +2709,11 @@ function updateBoostPads(dt) {
       continue;
     }
 
-
-    for (
-      const car of [
-        player,
-        bot
-      ]
-    ) {
+    for (const car of cars) {
 
       if (car.demolished) {
         continue;
       }
-
 
       if (
         Math.hypot(
@@ -2067,6 +2740,89 @@ function updateBoostPads(dt) {
   }
 }
 
+/* =========================================================
+   POINTS
+========================================================= */
+
+function setText(el, value) {
+
+  if (el) {
+    el.textContent = value;
+  }
+}
+
+function updatePoints() {
+
+  setText(
+    playerPointsEl,
+    playerPoints
+  );
+}
+
+function awardPoints(
+  amount,
+  reason
+) {
+
+  playerPoints += amount;
+
+  updatePoints();
+
+  if (pointsNotification) {
+
+    clearTimeout(pointsTimer);
+
+    pointsNotification.textContent =
+      `+${amount} ${reason}`;
+
+    pointsNotification.classList.remove(
+      "show"
+    );
+
+    void pointsNotification.offsetWidth;
+
+    pointsNotification.classList.add(
+      "show"
+    );
+
+    pointsTimer =
+      setTimeout(
+        () =>
+          pointsNotification.classList.remove(
+            "show"
+          ),
+        1100
+      );
+  }
+
+  pointsPanel?.classList.remove(
+    "earned"
+  );
+
+  if (pointsPanel) {
+
+    void pointsPanel.offsetWidth;
+
+    pointsPanel.classList.add(
+      "earned"
+    );
+  }
+}
+
+function resetPoints() {
+
+  playerPoints = 0;
+
+  saveCooldown = 0;
+
+  saveDangerHandled = false;
+
+  updatePoints();
+
+  pointsNotification?.classList.remove(
+    "show"
+  );
+}
 
 /* =========================================================
    BUT
@@ -2081,7 +2837,6 @@ function scoreGoal(team) {
     return;
   }
 
-
   goalActive = true;
 
   clearKeys();
@@ -2089,7 +2844,6 @@ function scoreGoal(team) {
   goalFlash = 1;
 
   spawnGoalParticles(team);
-
 
   if (team === "blue") {
 
@@ -2100,21 +2854,16 @@ function scoreGoal(team) {
       blueScore
     );
 
-
     if (
-      localTeam() === "blue"
+      gameMode === "offline" ||
+      onlinePlayerNumber === 1
     ) {
 
       awardPoints(
         150,
         "GOAL"
       );
-
-    } else {
-
-      awardOpponentPoints(150);
     }
-
 
     setText(
       goalText,
@@ -2125,7 +2874,6 @@ function scoreGoal(team) {
       goalScorer,
       "BLUE UNIT SCORES"
     );
-
 
     if (goalText) {
 
@@ -2145,21 +2893,16 @@ function scoreGoal(team) {
       orangeScore
     );
 
-
     if (
-      localTeam() === "orange"
+      gameMode === "multiplayer" &&
+      onlinePlayerNumber === 2
     ) {
 
       awardPoints(
         150,
         "GOAL"
       );
-
-    } else {
-
-      awardOpponentPoints(150);
     }
-
 
     setText(
       goalText,
@@ -2171,7 +2914,6 @@ function scoreGoal(team) {
       "ORANGE CREW SCORES"
     );
 
-
     if (goalText) {
 
       goalText.style.color =
@@ -2182,33 +2924,25 @@ function scoreGoal(team) {
     }
   }
 
-
   goalMessage?.classList.remove(
     "hidden"
   );
 
-
-  sendNetworkState();
-
-
   goalTimer =
-    setTimeout(() => {
+    setTimeout(
+      () => {
 
-      goalMessage?.classList.add(
-        "hidden"
-      );
+        goalMessage?.classList.add(
+          "hidden"
+        );
 
-      resetPositions();
+        resetPositions();
 
-      startCountdown();
-
-    }, 1800);
+        startCountdown();
+      },
+      1800
+    );
 }
-
-
-/* =========================================================
-   RESET / COUNTDOWN
-========================================================= */
 
 function resetPositions() {
 
@@ -2219,6 +2953,9 @@ function resetPositions() {
   saveDangerHandled = false;
 }
 
+/* =========================================================
+   COUNTDOWN
+========================================================= */
 
 function startCountdown() {
 
@@ -2230,11 +2967,9 @@ function startCountdown() {
     countdownFinish
   );
 
-
   goalActive = true;
 
   let count = 3;
-
 
   setText(
     countdownEl,
@@ -2245,50 +2980,51 @@ function startCountdown() {
     "hidden"
   );
 
-
   countdownTimer =
-    setInterval(() => {
+    setInterval(
+      () => {
 
-      count--;
+        count--;
 
+        if (count > 0) {
 
-      if (count > 0) {
+          setText(
+            countdownEl,
+            count
+          );
 
-        setText(
-          countdownEl,
-          count
-        );
+        } else {
 
-      } else {
+          clearInterval(
+            countdownTimer
+          );
 
-        clearInterval(
-          countdownTimer
-        );
+          countdownTimer = null;
 
-        countdownTimer = null;
+          setText(
+            countdownEl,
+            "GO!"
+          );
 
+          countdownFinish =
+            setTimeout(
+              () => {
 
-        setText(
-          countdownEl,
-          "GO!"
-        );
+                countdownEl?.classList.add(
+                  "hidden"
+                );
 
+                goalActive = false;
 
-        countdownFinish =
-          setTimeout(() => {
-
-            countdownEl?.classList.add(
-              "hidden"
+                updateMobileVisibility();
+              },
+              700
             );
-
-            goalActive = false;
-
-          }, 700);
-      }
-
-    }, 1000);
+        }
+      },
+      1000
+    );
 }
-
 
 /* =========================================================
    TIMER
@@ -2304,10 +3040,8 @@ function updateTimer(dt) {
     return;
   }
 
-
   gameTime -=
     dt / 1000;
-
 
   if (gameTime <= 0) {
 
@@ -2320,10 +3054,8 @@ function updateTimer(dt) {
     return;
   }
 
-
   updateTimerDisplay();
 }
-
 
 function updateTimerDisplay() {
 
@@ -2337,23 +3069,17 @@ function updateTimerDisplay() {
       gameTime % 60
     );
 
-
   setText(
     timerEl,
-    `${minutes}:${String(
-      seconds
-    ).padStart(2, "0")}`
+    `${minutes}:${String(seconds).padStart(2,"0")}`
   );
 }
 
-
 /* =========================================================
-   FIN DU MATCH
+   FIN DE MATCH
 ========================================================= */
 
-function endMatch(
-  conceded = false
-) {
+function endMatch(conceded = false) {
 
   if (
     !gameRunning &&
@@ -2362,15 +3088,24 @@ function endMatch(
     return;
   }
 
-
   gameRunning = false;
 
-  paused = false;
+  if (
+    gameMode === "multiplayer" &&
+    onlineHost &&
+    socket &&
+    socket.readyState === WebSocket.OPEN
+  ) {
 
+    sendNetworkState(true);
+  }
+
+  paused = false;
   goalActive = true;
 
-  clearKeys();
+  updateMobileVisibility();
 
+  clearKeys();
 
   clearInterval(
     countdownTimer
@@ -2387,7 +3122,6 @@ function endMatch(
   clearTimeout(
     introTimer
   );
-
 
   pauseMenu?.classList.add(
     "hidden"
@@ -2409,62 +3143,69 @@ function endMatch(
     "hidden"
   );
 
-
-  if (
-    gameMode === "multiplayer"
-  ) {
-
-    sendNetworkState();
-  }
-
-
-  const local =
-    localTeam();
-
-  let winner;
-
-
   if (conceded) {
 
-    winner =
-      local === "blue"
-        ? "ORANGE WINS"
-        : "BLUE WINS";
+    const winner =
+      gameMode === "multiplayer" &&
+      onlinePlayerNumber === 2
+        ? "BLUE WINS"
+        : "ORANGE WINS";
+
+    setText(
+      winnerDisplay,
+      winner
+    );
+
+    if (winnerDisplay) {
+
+      winnerDisplay.style.color =
+        winner.startsWith("BLUE")
+          ? "#43cfff"
+          : "#ff8a20";
+    }
 
   } else if (
-    blueScore > orangeScore
+    blueScore >
+    orangeScore
   ) {
 
-    winner = "BLUE WINS";
+    setText(
+      winnerDisplay,
+      "BLUE WINS"
+    );
+
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#43cfff";
+    }
 
   } else if (
-    orangeScore > blueScore
+    orangeScore >
+    blueScore
   ) {
 
-    winner = "ORANGE WINS";
+    setText(
+      winnerDisplay,
+      "ORANGE WINS"
+    );
+
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#ff8a20";
+    }
 
   } else {
 
-    winner = "DRAW";
+    setText(
+      winnerDisplay,
+      "DRAW"
+    );
+
+    if (winnerDisplay) {
+      winnerDisplay.style.color =
+        "#fff";
+    }
   }
-
-
-  setText(
-    winnerDisplay,
-    winner
-  );
-
-
-  if (winnerDisplay) {
-
-    winnerDisplay.style.color =
-      winner.startsWith("BLUE")
-        ? "#43cfff"
-        : winner.startsWith("ORANGE")
-          ? "#ff8a20"
-          : "#fff";
-  }
-
 
   setText(
     finalBlueScore,
@@ -2476,33 +3217,20 @@ function endMatch(
     orangeScore
   );
 
-
   resultScreen?.classList.remove(
     "hidden"
   );
 }
 
-
 /* =========================================================
-   DÉMARRAGE MATCH
+   DÉBUT MATCH
 ========================================================= */
 
-function startMatch() {
+function startMatch(mode = gameMode) {
 
-  if (
-    gameMode === "multiplayer" &&
-    !onlineConnected
-  ) {
+  gameMode = mode;
 
-    showNetworkStatus(
-      "CONNEXION AU SERVEUR..."
-    );
-
-    connectOnline(true);
-
-    return;
-  }
-
+  clearKeys();
 
   clearInterval(
     countdownTimer
@@ -2520,27 +3248,19 @@ function startMatch() {
     introTimer
   );
 
-
-  clearKeys();
-
   resetPoints();
-
 
   boostParticles.length = 0;
   goalParticles.length = 0;
-  demoParticles.length = 0;
-
+  demolitionParticles.length = 0;
 
   goalFlash = 0;
-  demoFlash = 0;
-
 
   for (const pad of boostPads) {
 
     pad.cooldown = 0;
     pad.flash = 0;
   }
-
 
   blueScore = 0;
   orangeScore = 0;
@@ -2553,6 +3273,7 @@ function startMatch() {
 
   goalActive = true;
 
+  updateMobileVisibility();
 
   setText(
     blueScoreEl,
@@ -2564,11 +3285,9 @@ function startMatch() {
     0
   );
 
-
   updateTimerDisplay();
 
   resetPositions();
-
 
   mainMenu?.classList.add(
     "hidden"
@@ -2594,28 +3313,27 @@ function startMatch() {
     "hidden"
   );
 
-
   matchIntro?.classList.remove(
     "hidden"
   );
 
-
   introTimer =
-    setTimeout(() => {
+    setTimeout(
+      () => {
 
-      if (!gameRunning) {
-        return;
-      }
+        if (!gameRunning) {
+          return;
+        }
 
-      matchIntro?.classList.add(
-        "hidden"
-      );
+        matchIntro?.classList.add(
+          "hidden"
+        );
 
-      startCountdown();
-
-    }, 900);
+        startCountdown();
+      },
+      900
+    );
 }
-
 
 /* =========================================================
    MENU PRINCIPAL
@@ -2623,27 +3341,7 @@ function startMatch() {
 
 function showMainMenu() {
 
-  if (
-    socket &&
-    onlineConnected
-  ) {
-
-    try {
-
-      socket.send(
-        JSON.stringify({
-          type: "leave-match"
-        })
-      );
-
-    } catch {}
-  }
-
-
-  gameRunning = false;
-  paused = false;
-  goalActive = false;
-
+  stopOnline();
 
   clearInterval(
     countdownTimer
@@ -2661,11 +3359,13 @@ function showMainMenu() {
     introTimer
   );
 
-
   clearKeys();
 
-  resetPoints();
+  gameRunning = false;
+  paused = false;
+  goalActive = false;
 
+  resetPoints();
 
   matchIntro?.classList.add(
     "hidden"
@@ -2699,12 +3399,12 @@ function showMainMenu() {
     "hidden"
   );
 
-
   mainMenu?.classList.remove(
     "hidden"
   );
-}
 
+  updateMobileVisibility();
+}
 
 /* =========================================================
    PAUSE
@@ -2719,18 +3419,17 @@ function togglePause() {
     return;
   }
 
-
   paused = !paused;
 
   clearKeys();
-
 
   pauseMenu?.classList.toggle(
     "hidden",
     !paused
   );
-}
 
+  updateMobileVisibility();
+}
 
 $("resumeButton")?.addEventListener(
   "click",
@@ -2747,23 +3446,24 @@ $("resumeButton")?.addEventListener(
     pauseMenu?.classList.add(
       "hidden"
     );
+
+    updateMobileVisibility();
   }
 );
-
 
 $("concedeButton")?.addEventListener(
   "click",
   () => {
 
-    if (gameRunning) {
-
-      concedeConfirm?.classList.remove(
-        "hidden"
-      );
+    if (!gameRunning) {
+      return;
     }
+
+    concedeConfirm?.classList.remove(
+      "hidden"
+    );
   }
 );
-
 
 $("cancelConcedeButton")?.addEventListener(
   "click",
@@ -2774,7 +3474,6 @@ $("cancelConcedeButton")?.addEventListener(
     );
   }
 );
-
 
 $("confirmConcedeButton")?.addEventListener(
   "click",
@@ -2788,906 +3487,953 @@ $("confirmConcedeButton")?.addEventListener(
   }
 );
 
-
 $("pauseMainMenuButton")?.addEventListener(
   "click",
   showMainMenu
 );
 
-
 /* =========================================================
-   PARAMÈTRES
+   AFFICHAGE
 ========================================================= */
 
-$("settingsButton")?.addEventListener(
-  "click",
-  () => openSettings("main")
-);
+function drawArena() {
 
+  ctx.fillStyle =
+    "#06131f";
 
-$("pauseSettingsButton")?.addEventListener(
-  "click",
-  () => openSettings("pause")
-);
-
-
-function openSettings(from) {
-
-  settingsReturn = from;
-
-  mainMenu?.classList.add(
-    "hidden"
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
   );
 
-  howToPlayMenu?.classList.add(
-    "hidden"
-  );
+  ctx.strokeStyle =
+    "rgba(80,180,255,.08)";
 
-  pauseMenu?.classList.add(
-    "hidden"
-  );
+  ctx.lineWidth = 1;
 
-  settingsMenu?.classList.remove(
-    "hidden"
-  );
+  for (
+    let x = 0;
+    x < W;
+    x += 60
+  ) {
 
+    ctx.beginPath();
 
-  updateControlUI();
-
-  updateMobileSettings();
-}
-
-
-$("settingsBackButton")?.addEventListener(
-  "click",
-  () => {
-
-    settingsMenu?.classList.add(
-      "hidden"
+    ctx.moveTo(
+      x,
+      0
     );
 
+    ctx.lineTo(
+      x,
+      H
+    );
+
+    ctx.stroke();
+  }
+
+  for (
+    let y = 0;
+    y < H;
+    y += 60
+  ) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      y
+    );
+
+    ctx.lineTo(
+      W,
+      y
+    );
+
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle =
+    "rgba(120,220,255,.35)";
+
+  ctx.lineWidth = 3;
+
+  ctx.strokeRect(
+    field.left,
+    field.top,
+    field.right -
+      field.left,
+    field.bottom -
+      field.top
+  );
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    W / 2,
+    field.top
+  );
+
+  ctx.lineTo(
+    W / 2,
+    field.bottom
+  );
+
+  ctx.stroke();
+
+  ctx.beginPath();
+
+  ctx.arc(
+    W / 2,
+    H / 2,
+    85,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.stroke();
+
+  ctx.fillStyle =
+    "#72eaff";
+
+  ctx.beginPath();
+
+  ctx.arc(
+    W / 2,
+    H / 2,
+    5,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fill();
+
+  /*
+     CAGES VISIBLES
+     ZONE DE DÉTECTION INVISIBLE
+  */
+
+  ctx.lineWidth = 5;
+
+  ctx.shadowBlur = 18;
+
+  ctx.strokeStyle =
+    "#18cfff";
+
+  ctx.shadowColor =
+    "#00aaff";
+
+  ctx.strokeRect(
+    field.left -
+      goal.depth,
+    goal.top,
+    goal.depth,
+    goal.bottom -
+      goal.top
+  );
+
+  ctx.strokeStyle =
+    "#ff851b";
+
+  ctx.shadowColor =
+    "#ff5e00";
+
+  ctx.strokeRect(
+    field.right,
+    goal.top,
+    goal.depth,
+    goal.bottom -
+      goal.top
+  );
+
+  ctx.shadowBlur = 0;
+
+  drawBoostPads();
+}
+
+function drawBoostPads() {
+
+  for (const pad of boostPads) {
+
+    const available =
+      pad.cooldown <= 0;
+
+    const pulse =
+      1 +
+      Math.sin(
+        pad.pulse
+      ) *
+      0.08;
+
+    ctx.save();
+
+    ctx.translate(
+      pad.x,
+      pad.y
+    );
+
+    ctx.globalAlpha =
+      available
+        ? 1
+        : 0.35;
+
+    ctx.shadowColor =
+      pad.color;
+
+    ctx.shadowBlur =
+      available
+        ? 22
+        : 8;
+
+    ctx.fillStyle =
+      "rgba(8,18,30,.9)";
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      0,
+      0,
+      28 * pulse,
+      16 * pulse,
+      0,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle =
+      pad.color;
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      0,
+      0,
+      19 * pulse,
+      8 * pulse,
+      0,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      "#fff";
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      23 * pulse,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.stroke();
+
+    if (pad.flash > 0) {
+
+      ctx.globalAlpha =
+        pad.flash;
+
+      ctx.strokeStyle =
+        "#fff";
+
+      ctx.lineWidth = 4;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        0,
+        0,
+        32 +
+          (1 - pad.flash) *
+            18,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  drawParticles(
+    boostParticles
+  );
+}
+
+function drawParticles(list) {
+
+  for (const particle of list) {
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      Math.max(
+        0,
+        Math.min(
+          1,
+          particle.life
+        )
+      );
+
+    ctx.fillStyle =
+      particle.color;
+
+    ctx.shadowColor =
+      particle.color;
+
+    ctx.shadowBlur = 12;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      particle.x,
+      particle.y,
+      particle.size,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+function drawGoalEffects() {
+
+  drawParticles(
+    goalParticles
+  );
+
+  drawParticles(
+    demolitionParticles
+  );
+
+  if (goalFlash > 0) {
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      goalFlash * 0.12;
+
+    ctx.fillStyle =
+      "#fff";
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.restore();
+  }
+}
+
+/* =========================================================
+   HUD
+========================================================= */
+
+function updateHUD() {
+
+  const car =
+    localCar();
+
+  if (boostFill) {
+
+    boostFill.style.width =
+      `${car.boost}%`;
+  }
+
+  setText(
+    boostNumber,
+    Math.floor(
+      car.boost
+    )
+  );
+
+  const speed =
+    Math.abs(car.speed);
+
+  const kmh =
+    car.boosting
+
+      ? Math.round(
+          Math.min(
+            83,
+            speed *
+              (83 / 11.7)
+          )
+        )
+
+      : Math.round(
+          Math.min(
+            51,
+            speed *
+              (51 / 7.2)
+          )
+        );
+
+  setText(
+    speedNumber,
+    kmh
+  );
+}
+
+/* =========================================================
+   OUTILS
+========================================================= */
+
+function roundRect(
+  x,
+  y,
+  width,
+  height,
+  radius
+) {
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    x + radius,
+    y
+  );
+
+  ctx.lineTo(
+    x + width - radius,
+    y
+  );
+
+  ctx.quadraticCurveTo(
+    x + width,
+    y,
+    x + width,
+    y + radius
+  );
+
+  ctx.lineTo(
+    x + width,
+    y + height - radius
+  );
+
+  ctx.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - radius,
+    y + height
+  );
+
+  ctx.lineTo(
+    x + radius,
+    y + height
+  );
+
+  ctx.quadraticCurveTo(
+    x,
+    y + height,
+    x,
+    y + height - radius
+  );
+
+  ctx.lineTo(
+    x,
+    y + radius
+  );
+
+  ctx.quadraticCurveTo(
+    x,
+    y,
+    x + radius,
+    y
+  );
+
+  ctx.closePath();
+}
+
+/* =========================================================
+   GAME LOOP
+========================================================= */
+
+function gameLoop(now) {
+
+  const dt =
+    Math.min(
+      now - lastTime,
+      100
+    );
+
+  lastTime = now;
+
+  updateEffects(dt);
+
+  updateBoostPads(dt);
+
+  if (
+    gameRunning &&
+    !paused &&
+    !goalActive
+  ) {
 
     if (
-      settingsReturn === "pause" &&
-      gameRunning
+      gameMode === "multiplayer"
     ) {
 
-      pauseMenu?.classList.remove(
-        "hidden"
-      );
+      if (onlineHost) {
+
+        player.update();
+
+        bot.updateRemote(
+          remoteInput
+        );
+
+        if (!bot.demolished) {
+
+          bot.x +=
+            Math.cos(bot.angle) *
+            bot.speed;
+
+          bot.y +=
+            Math.sin(bot.angle) *
+            bot.speed;
+
+          bot.speed *= 0.985;
+
+          if (
+            Math.abs(bot.speed) <
+            0.02
+          ) {
+            bot.speed = 0;
+          }
+
+          bot.keepInside();
+
+          bot.boost =
+            Math.min(
+              100,
+              bot.boost + 0.025
+            );
+        }
+
+        ball.update();
+
+        if (!goalActive) {
+
+          carBallCollision(
+            player
+          );
+
+          carBallCollision(
+            bot
+          );
+
+          carCarCollision(
+            player,
+            bot
+          );
+
+          updateTimer(dt);
+        }
+
+        if (
+          performance.now() -
+            lastNetworkSend >
+          45
+        ) {
+
+          sendNetworkState(
+            false
+          );
+        }
+
+      } else {
+
+        /*
+           JOUEUR 2 :
+           envoie ses touches
+        */
+
+        sendLocalInput();
+      }
 
     } else {
 
-      mainMenu?.classList.remove(
-        "hidden"
-      );
-    }
-  }
-);
+      /*
+         HORS LIGNE
+      */
 
+      player.update();
 
-/* =========================================================
-   COMMENT JOUER
-========================================================= */
+      bot.update();
 
-$("howToPlayButton")?.addEventListener(
-  "click",
-  () => {
+      ball.update();
 
-    mainMenu?.classList.add(
-      "hidden"
-    );
+      if (!goalActive) {
 
-    howToPlayMenu?.classList.remove(
-      "hidden"
-    );
-
-    updateControlUI();
-  }
-);
-
-
-$("backButton")?.addEventListener(
-  "click",
-  () => {
-
-    howToPlayMenu?.classList.add(
-      "hidden"
-    );
-
-    mainMenu?.classList.remove(
-      "hidden"
-    );
-  }
-);
-
-
-/* =========================================================
-   REMAPPING CLAVIER
-========================================================= */
-
-for (
-  const action of Object.keys(keyButtons)
-) {
-
-  keyButtons[action]?.addEventListener(
-    "click",
-    () => {
-
-      if (waitingForAction) {
-        return;
-      }
-
-
-      waitingForAction =
-        keyButtons[action];
-
-      waitingForAction.dataset.action =
-        action;
-
-      waitingForAction.textContent =
-        "PRESS A KEY";
-    }
-  );
-}
-
-
-$("resetControlsButton")?.addEventListener(
-  "click",
-  () => {
-
-    controls = {
-      ...defaults
-    };
-
-    saveControls();
-
-    updateControlUI();
-  }
-);
-
-
-document.addEventListener(
-  "keydown",
-  e => {
-
-    if (waitingForAction) {
-
-      e.preventDefault();
-
-
-      if (e.key === "Escape") {
-
-        waitingForAction.textContent =
-          keyName(
-            controls[
-              waitingForAction.dataset.action
-            ]
-          );
-
-        waitingForAction = null;
-
-        return;
-      }
-
-
-      const action =
-        waitingForAction.dataset.action;
-
-      const newKey =
-        normalizedKey(e);
-
-
-      if (
-        !newKey ||
-        newKey === "p" ||
-        newKey === "escape"
-      ) {
-        return;
-      }
-
-
-      const alreadyUsed =
-        Object.keys(controls).some(
-          other =>
-            other !== action &&
-            controls[other] === newKey
+        carBallCollision(
+          player
         );
 
+        carBallCollision(
+          bot
+        );
 
-      if (alreadyUsed) {
-        return;
+        carCarCollision(
+          player,
+          bot
+        );
+
+        updateTimer(dt);
       }
-
-
-      controls[action] =
-        newKey;
-
-      saveControls();
-
-      updateControlUI();
-
-      waitingForAction = null;
-
-      return;
     }
-
-
-    const k =
-      normalizedKey(e);
-
-
-    if (k === "space") {
-      e.preventDefault();
-    }
-
-
-    if (
-      gameRunning &&
-      !goalActive &&
-      k === "p" &&
-      !mobileMode
-    ) {
-
-      togglePause();
-
-      return;
-    }
-
-
-    keys[k] = true;
   }
-);
 
+  drawArena();
 
-document.addEventListener(
-  "keyup",
-  e => {
+  ball.draw();
 
-    keys[
-      normalizedKey(e)
-    ] = false;
-  }
-);
+  player.draw();
 
+  bot.draw();
 
-window.addEventListener(
-  "blur",
-  clearKeys
-);
+  drawGoalEffects();
 
+  updateHUD();
+
+  requestAnimationFrame(
+    gameLoop
+  );
+}
 
 /* =========================================================
-   APPAREIL / MOBILE
+   ONLINE : RECHERCHE
 ========================================================= */
 
-function ensureMobileSystem() {
+function makeSearchOverlay() {
 
-  /*
-    CSS dynamique
-  */
+  if (searchOverlay) {
+    return;
+  }
 
-  const style =
-    document.createElement("style");
+  searchOverlay =
+    document.createElement("div");
 
-  style.textContent = `
+  searchOverlay.id =
+    "onlineSearchOverlay";
 
-    #deviceChooser {
-      position: fixed;
-      inset: 0;
-      background: rgba(2,8,16,.97);
-      z-index: 9999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-    }
+  searchOverlay.innerHTML = `
+    <div style="
+      font-size:42px;
+      font-weight:900;
+      letter-spacing:3px;
+    ">
+      1V1 EN LIGNE
+    </div>
 
-    #deviceChooser.hidden {
-      display: none;
-    }
+    <div id="onlineSearchText"
+      style="
+        margin-top:18px;
+        font-size:22px;
+      ">
+      RECHERCHE D'UN JOUEUR…
+    </div>
 
-    .device-box {
-      text-align: center;
-      padding: 35px;
-      border: 1px solid #36d8ff;
-      border-radius: 20px;
-      box-shadow:
-        0 0 40px rgba(0,200,255,.2);
-      background: #081522;
-    }
+    <button id="cancelOnlineSearch"
+      style="
+        margin-top:28px;
+        padding:13px 24px;
+        border:0;
+        border-radius:10px;
+        font-weight:800;
+        cursor:pointer;
+      ">
+      ANNULER
+    </button>
+  `;
 
-    .device-box h1 {
-      margin-bottom: 25px;
-    }
-
-    .device-box button,
-    .online-btn,
-    .mobile-boost-btn,
-    .mobile-pause-btn {
-      border: 1px solid #36d8ff;
-      background: #0a2030;
-      color: #fff;
-      border-radius: 12px;
-      padding: 14px 22px;
-      font-weight: 800;
-      cursor: pointer;
-      margin: 6px;
-    }
-
-    .online-status {
-      font-size: 13px;
-      margin-top: 10px;
-      color: #7deaff;
-    }
-
-    .mobile-controls {
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      pointer-events: none;
-    }
-
-    .mobile-controls.hidden {
-      display: none;
-    }
-
-    .mobile-touchpad {
-      position: absolute;
-      inset: 0;
-      pointer-events: auto;
-      touch-action: none;
-      background: transparent;
-    }
-
-    .mobile-boost-btn,
-    .mobile-pause-btn {
-      position: absolute;
-      z-index: 21;
-      pointer-events: auto;
+  Object.assign(
+    searchOverlay.style,
+    {
+      position: "fixed",
+      inset: "0",
+      zIndex: "12000",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
       background:
-        rgba(5,25,40,.78);
-      box-shadow:
-        0 0 25px rgba(0,200,255,.25);
+        "rgba(3,8,16,.96)",
+      color: "white",
+      fontFamily:
+        "Arial,sans-serif",
+      textAlign: "center"
     }
+  );
 
-    .mobile-boost-btn {
-      width: 92px;
-      height: 92px;
-      border-radius: 50%;
-      font-size: 15px;
-    }
+  document.body.appendChild(
+    searchOverlay
+  );
 
-    .mobile-pause-btn {
-      top: 15px;
-      right: 15px;
-      width: 58px;
-      height: 58px;
-      border-radius: 50%;
-    }
+  $("cancelOnlineSearch").onclick =
+    cancelOnlineSearch;
+}
 
-    .mobile-boost-btn.left {
-      left: 20px;
-      bottom: 22px;
-    }
+function setSearchText(text) {
 
-    .mobile-boost-btn.right {
-      right: 20px;
-      bottom: 22px;
-    }
+  makeSearchOverlay();
 
-    .mobile-settings-row {
-      margin-top: 18px;
-      padding-top: 12px;
-      border-top:
-        1px solid rgba(255,255,255,.12);
-    }
+  const element =
+    $("onlineSearchText");
 
-    .mobile-settings-row button {
-      padding: 9px 12px;
-    }
-
-  `;
-
-  document.head.appendChild(style);
-
-
-  /*
-    Choix PC / MOBILE
-  */
-
-  let chooser =
-    document.getElementById(
-      "deviceChooser"
-    );
-
-
-  if (!chooser) {
-
-    chooser =
-      document.createElement("div");
-
-    chooser.id =
-      "deviceChooser";
-
-
-    chooser.innerHTML = `
-      <div class="device-box">
-        <h1>ROCKET LEAGUE.IO</h1>
-        <p>CHOISIS TON APPAREIL</p>
-
-        <button id="devicePC">
-          💻 PC
-        </button>
-
-        <button id="deviceMobile">
-          📱 MOBILE
-        </button>
-      </div>
-    `;
-
-
-    document.body.appendChild(
-      chooser
-    );
+  if (element) {
+    element.textContent = text;
   }
-
-
-  $("#devicePC").onclick =
-    () => setDevice("pc");
-
-  $("#deviceMobile").onclick =
-    () => setDevice("mobile");
-
-
-  /*
-    Contrôles mobiles
-  */
-
-  let mobileControls =
-    document.getElementById(
-      "mobileControls"
-    );
-
-
-  if (!mobileControls) {
-
-    mobileControls =
-      document.createElement("div");
-
-    mobileControls.id =
-      "mobileControls";
-
-    mobileControls.className =
-      "mobile-controls";
-
-
-    mobileControls.innerHTML = `
-      <div
-        id="mobileTouchpad"
-        class="mobile-touchpad">
-      </div>
-
-      <button
-        id="mobilePause"
-        class="mobile-pause-btn">
-        Ⅱ
-      </button>
-
-      <button
-        id="mobileBoost"
-        class="mobile-boost-btn">
-        BOOST
-      </button>
-    `;
-
-
-    document.body.appendChild(
-      mobileControls
-    );
-  }
-
-
-  const pad =
-    $("mobileTouchpad");
-
-
-  const stopTouch = () => {
-
-    mobileTouch.active = false;
-
-    mobileTouch.x =
-      mobileTouch.cx;
-
-    mobileTouch.y =
-      mobileTouch.cy;
-  };
-
-
-  pad.addEventListener(
-    "pointerdown",
-    e => {
-
-      mobileTouch.active = true;
-
-      mobileTouch.cx =
-        e.clientX;
-
-      mobileTouch.cy =
-        e.clientY;
-
-      mobileTouch.x =
-        e.clientX;
-
-      mobileTouch.y =
-        e.clientY;
-
-
-      pad.setPointerCapture?.(
-        e.pointerId
-      );
-    }
-  );
-
-
-  pad.addEventListener(
-    "pointermove",
-    e => {
-
-      if (
-        mobileTouch.active
-      ) {
-
-        mobileTouch.x =
-          e.clientX;
-
-        mobileTouch.y =
-          e.clientY;
-      }
-    }
-  );
-
-
-  pad.addEventListener(
-    "pointerup",
-    stopTouch
-  );
-
-  pad.addEventListener(
-    "pointercancel",
-    stopTouch
-  );
-
-
-  const boostButton =
-    $("mobileBoost");
-
-
-  boostButton.addEventListener(
-    "pointerdown",
-    e => {
-
-      e.preventDefault();
-
-      mobileBoost = true;
-    }
-  );
-
-
-  boostButton.addEventListener(
-    "pointerup",
-    () => {
-
-      mobileBoost = false;
-    }
-  );
-
-
-  boostButton.addEventListener(
-    "pointercancel",
-    () => {
-
-      mobileBoost = false;
-    }
-  );
-
-
-  $("mobilePause").addEventListener(
-    "click",
-    togglePause
-  );
 }
-
-
-function setDevice(mode) {
-
-  deviceMode = mode;
-
-  mobileMode =
-    mode === "mobile";
-
-
-  localStorage.setItem(
-    "rocketleague-device-mode",
-    mode
-  );
-
-
-  $("#deviceChooser")?.classList.add(
-    "hidden"
-  );
-
-
-  $("#mobileControls")?.classList.toggle(
-    "hidden",
-    !mobileMode
-  );
-
-
-  updateMobileSettings();
-
-  updateBoostSide();
-}
-
-
-function showDeviceChooser() {
-
-  $("#deviceChooser")?.classList.remove(
-    "hidden"
-  );
-
-
-  $("#mobileControls")?.classList.add(
-    "hidden"
-  );
-}
-
 
 /* =========================================================
-   SETTINGS MOBILE
+   ONLINE : CONNEXION
 ========================================================= */
 
-function updateMobileSettings() {
-
-  if (!settingsMenu) {
-    return;
-  }
-
-
-  let box =
-    document.getElementById(
-      "mobileSettingsBox"
-    );
-
-
-  if (!box) {
-
-    box =
-      document.createElement("div");
-
-    box.id =
-      "mobileSettingsBox";
-
-    box.className =
-      "mobile-settings-row";
-
-    settingsMenu.appendChild(
-      box
-    );
-  }
-
-
-  box.innerHTML = `
-
-    <b>📱 MOBILE</b>
-    <br>
-
-    <button id="boostLeftBtn">
-      BOOST GAUCHE
-    </button>
-
-    <button id="boostRightBtn">
-      BOOST DROITE
-    </button>
-
-    <button id="resetMobileButton">
-      RESET MOBILE
-    </button>
-  `;
-
-
-  box.style.display =
-    mobileMode
-      ? "block"
-      : "none";
-
-
-  $("#boostLeftBtn")?.addEventListener(
-    "click",
-    () => {
-
-      mobileBoostSide = "left";
-
-      localStorage.setItem(
-        "rocketleague-mobile-boost-side",
-        "left"
-      );
-
-      updateBoostSide();
-    }
-  );
-
-
-  $("#boostRightBtn")?.addEventListener(
-    "click",
-    () => {
-
-      mobileBoostSide = "right";
-
-      localStorage.setItem(
-        "rocketleague-mobile-boost-side",
-        "right"
-      );
-
-      updateBoostSide();
-    }
-  );
-
-
-  $("#resetMobileButton")?.addEventListener(
-    "click",
-    () => {
-
-      mobileBoostSide = "left";
-
-      localStorage.setItem(
-        "rocketleague-mobile-boost-side",
-        "left"
-      );
-
-      updateBoostSide();
-    }
-  );
-
-
-  updateBoostSide();
-}
-
-
-function updateBoostSide() {
-
-  const button =
-    $("mobileBoost");
-
-  if (!button) {
-    return;
-  }
-
-
-  button.classList.remove(
-    "left",
-    "right"
-  );
-
-
-  button.classList.add(
-    mobileBoostSide
-  );
-}
-
-
-/* =========================================================
-   MENU ONLINE
-========================================================= */
-
-function setupOnlineMenu() {
-
-  const offlineButton =
-    $("playButton");
-
-
-  if (!offlineButton) {
-    return;
-  }
-
+function connectOnline() {
 
   if (
-    document.getElementById(
-      "onlinePlayButton"
+    socket &&
+    (
+      socket.readyState ===
+        WebSocket.OPEN ||
+      socket.readyState ===
+        WebSocket.CONNECTING
     )
   ) {
     return;
   }
 
+  try {
 
-  const onlineButton =
-    offlineButton.cloneNode(true);
+    socket =
+      new WebSocket(
+        ONLINE_SERVER_URL
+      );
 
+  } catch (error) {
 
-  onlineButton.id =
-    "onlinePlayButton";
+    setSearchText(
+      "CONNEXION AU SERVEUR…"
+    );
 
-  onlineButton.textContent =
-    "1V1 EN LIGNE";
+    scheduleReconnect();
 
+    return;
+  }
 
-  offlineButton.parentNode?.insertBefore(
-    onlineButton,
-    offlineButton
-  );
+  socket.onopen = () => {
 
+    onlineSearching = true;
 
-  offlineButton.textContent =
-    "JEU HORS LIGNE";
+    setSearchText(
+      "RECHERCHE D'UN JOUEUR…"
+    );
 
+    socket.send(
+      JSON.stringify({
+        type: "find-match",
+        mode: "1v1"
+      })
+    );
+  };
 
-  const status =
-    document.createElement("div");
+  socket.onmessage = event => {
 
+    let data;
 
-  status.id =
-    "onlineStatus";
+    try {
 
-  status.className =
-    "online-status";
+      data =
+        JSON.parse(
+          event.data
+        );
 
+    } catch {
 
-  offlineButton.parentNode?.insertBefore(
-    status,
-    offlineButton.nextSibling
-  );
+      return;
+    }
 
+    if (
+      data.type ===
+      "searching"
+    ) {
 
-  onlineButton.addEventListener(
-    "click",
-    startOnlineSearch
-  );
+      onlineSearching = true;
+
+      setSearchText(
+        "RECHERCHE D'UN JOUEUR…"
+      );
+    }
+
+    if (
+      data.type ===
+      "match-found"
+    ) {
+
+      onlineSearching = false;
+
+      onlineHost =
+        !!data.isHost;
+
+      onlinePlayerNumber =
+        data.playerNumber;
+
+      onlineMatchId =
+        data.matchId;
+
+      if (searchOverlay) {
+
+        searchOverlay.remove();
+
+        searchOverlay = null;
+      }
+
+      startMatch(
+        "multiplayer"
+      );
+    }
+
+    if (
+      data.type ===
+      "opponent-input"
+    ) {
+
+      remoteInput = {
+        ...remoteInput,
+        ...(data.input || {})
+      };
+    }
+
+    if (
+      data.type ===
+      "game-state"
+    ) {
+
+      applyNetworkState(
+        data.state
+      );
+    }
+
+    if (
+      data.type ===
+      "opponent-left"
+    ) {
+
+      alert(
+        "L'adversaire a quitté la partie."
+      );
+
+      stopOnline();
+
+      showMainMenu();
+    }
+
+    if (
+      data.type === "pong"
+    ) {
+
+      lastHeartbeat =
+        performance.now();
+    }
+  };
+
+  socket.onclose = () => {
+
+    if (onlineSearching) {
+
+      setSearchText(
+        "RECONNEXION AU SERVEUR…"
+      );
+
+      scheduleReconnect();
+    }
+  };
+
+  socket.onerror = () => {};
 }
 
+/* =========================================================
+   RECONNEXION
+========================================================= */
 
-function showNetworkStatus(text) {
+function scheduleReconnect() {
 
-  setText(
-    $("onlineStatus"),
-    text
-  );
+  if (
+    reconnectTimer ||
+    !onlineSearching
+  ) {
+    return;
+  }
+
+  reconnectTimer =
+    setTimeout(
+      () => {
+
+        reconnectTimer = null;
+
+        connectOnline();
+      },
+      3000
+    );
 }
 
+/* =========================================================
+   LANCER RECHERCHE
+========================================================= */
 
-function startOffline() {
+function startOnlineSearch() {
 
-  gameMode = "offline";
+  gameMode =
+    "multiplayer";
+
+  onlineSearching = true;
+
+  onlineHost = false;
 
   onlinePlayerNumber = 0;
 
   onlineMatchId = null;
 
-  startMatch();
-}
+  makeSearchOverlay();
 
-
-function startOnlineSearch() {
-
-  gameMode = "multiplayer";
-
-  gameRunning = false;
-
-  showNetworkStatus(
-    "RECHERCHE D'UN ADVERSAIRE..."
+  setSearchText(
+    "RECHERCHE D'UN JOUEUR…"
   );
 
-
-  connectOnline(false);
+  connectOnline();
 }
 
-
 /* =========================================================
-   WEBSOCKET
+   ANNULER RECHERCHE
 ========================================================= */
 
-function connectOnline(
-  startImmediately
-) {
+function cancelOnlineSearch() {
+
+  onlineSearching = false;
+
+  if (reconnectTimer) {
+
+    clearTimeout(
+      reconnectTimer
+    );
+
+    reconnectTimer = null;
+  }
 
   if (
     socket &&
@@ -3697,229 +4443,106 @@ function connectOnline(
 
     socket.send(
       JSON.stringify({
-        type: "find-match"
+        type: "cancel-search"
       })
     );
-
-    return;
   }
 
+  if (socket) {
 
-  try {
-
-    socket =
-      new WebSocket(
-        ONLINE_SERVER_URL
-      );
-
-  } catch {
-
-    showNetworkStatus(
-      "SERVEUR INDISPONIBLE"
-    );
-
-    return;
+    try {
+      socket.close();
+    } catch {}
   }
 
+  socket = null;
 
-  socket.addEventListener(
-    "open",
-    () => {
+  if (searchOverlay) {
 
-      onlineConnected = true;
+    searchOverlay.remove();
 
+    searchOverlay = null;
+  }
 
-      showNetworkStatus(
-        "RECHERCHE D'UN ADVERSAIRE..."
-      );
+  gameMode =
+    "offline";
 
-
-      socket.send(
-        JSON.stringify({
-          type: "find-match"
-        })
-      );
-    }
-  );
-
-
-  socket.addEventListener(
-    "message",
-    e => {
-
-      let data;
-
-      try {
-
-        data =
-          JSON.parse(
-            e.data
-          );
-
-      } catch {
-
-        return;
-      }
-
-
-      handleNetworkMessage(
-        data
-      );
-    }
-  );
-
-
-  socket.addEventListener(
-    "close",
-    () => {
-
-      onlineConnected = false;
-
-
-      if (
-        gameRunning &&
-        gameMode ===
-          "multiplayer"
-      ) {
-
-        showNetworkStatus(
-          "ADVERSAIRE DÉCONNECTÉ"
-        );
-
-        endMatch(false);
-      }
-    }
-  );
-
-
-  socket.addEventListener(
-    "error",
-    () => {
-
-      showNetworkStatus(
-        "ERREUR SERVEUR"
-      );
-    }
-  );
+  showMainMenu();
 }
 
-
 /* =========================================================
-   RÉCEPTION ONLINE
+   ARRÊT ONLINE
 ========================================================= */
 
-function handleNetworkMessage(data) {
+function stopOnline() {
 
-  if (
-    data.type === "connected"
-  ) {
-    return;
-  }
+  onlineSearching = false;
 
+  if (reconnectTimer) {
 
-  if (
-    data.type === "searching"
-  ) {
-
-    showNetworkStatus(
-      "RECHERCHE D'UN ADVERSAIRE..."
+    clearTimeout(
+      reconnectTimer
     );
 
-    return;
+    reconnectTimer = null;
   }
 
-
   if (
-    data.type === "match-found"
+    socket &&
+    socket.readyState ===
+      WebSocket.OPEN &&
+    onlineMatchId
   ) {
 
-    onlineMatchId =
-      data.matchId;
-
-    onlinePlayerNumber =
-      data.playerNumber;
-
-    isOnlineHost =
-      data.isHost;
-
-
-    showNetworkStatus(
-      `MATCH TROUVÉ — ${data.team.toUpperCase()}`
+    socket.send(
+      JSON.stringify({
+        type: "leave-match"
+      })
     );
-
-
-    startMatch();
-
-    return;
   }
 
+  if (socket) {
 
-  if (
-    data.type ===
-      "search-cancelled"
-  ) {
-
-    showNetworkStatus("");
-
-    return;
+    try {
+      socket.close();
+    } catch {}
   }
 
+  socket = null;
 
-  if (
-    data.type ===
-      "opponent-input"
-  ) {
+  onlineMatchId = null;
 
-    opponentInput =
-      data.input || {};
+  onlineHost = false;
 
-    return;
-  }
+  onlinePlayerNumber = 0;
 
+  if (searchOverlay) {
 
-  if (
-    data.type ===
-      "game-state" &&
-    !isOnlineHost
-  ) {
+    searchOverlay.remove();
 
-    applyNetworkState(
-      data.state
-    );
-
-    return;
-  }
-
-
-  if (
-    data.type ===
-      "opponent-left"
-  ) {
-
-    showNetworkStatus(
-      "ADVERSAIRE DÉCONNECTÉ"
-    );
-
-    endMatch(false);
+    searchOverlay = null;
   }
 }
 
-
 /* =========================================================
-   INPUT ONLINE
+   ENVOI TOUCHES JOUEUR ONLINE
 ========================================================= */
 
-function sendInput() {
+function sendLocalInput() {
 
   if (
-    !onlineConnected ||
     !socket ||
     socket.readyState !==
-      WebSocket.OPEN
+      WebSocket.OPEN ||
+    !onlineMatchId
   ) {
     return;
   }
 
+  /*
+     LES TOUCHES SONT BIEN
+     TRANSFORMÉES EN INPUT ONLINE.
+  */
 
   const input = {
 
@@ -3946,12 +4569,17 @@ function sendInput() {
     boost:
       controlPressed(
         "boost"
-      ) ||
-      mobileBoost
+      )
   };
 
+  const now =
+    performance.now();
 
-  try {
+  if (
+    now -
+      lastNetworkSend >
+    45
+  ) {
 
     socket.send(
       JSON.stringify({
@@ -3960,247 +4588,203 @@ function sendInput() {
       })
     );
 
-  } catch {}
+    lastNetworkSend = now;
+  }
 }
 
-
 /* =========================================================
-   ÉTAT ONLINE
+   ENVOI ÉTAT HÔTE
 ========================================================= */
 
-function sendNetworkState() {
+function sendNetworkState(
+  force
+) {
 
   if (
-    gameMode !==
-      "multiplayer" ||
-    !isOnlineHost ||
+    !onlineHost ||
     !socket ||
     socket.readyState !==
-      WebSocket.OPEN
+      WebSocket.OPEN ||
+    !onlineMatchId
   ) {
     return;
   }
 
+  const now =
+    performance.now();
+
+  if (
+    !force &&
+    now -
+      lastNetworkSend <
+      45
+  ) {
+    return;
+  }
 
   const state = {
 
-    blue: {
+    player: {
+
       x: player.x,
       y: player.y,
+
       angle: player.angle,
+
       speed: player.speed,
+
       boost: player.boost,
-      boosting: player.boosting,
+
+      boosting:
+        player.boosting,
+
       demolished:
         player.demolished,
+
       demoTimer:
         player.demoTimer
     },
 
+    bot: {
 
-    orange: {
       x: bot.x,
       y: bot.y,
+
       angle: bot.angle,
+
       speed: bot.speed,
+
       boost: bot.boost,
-      boosting: bot.boosting,
+
+      boosting:
+        bot.boosting,
+
       demolished:
         bot.demolished,
+
       demoTimer:
         bot.demoTimer
     },
 
-
     ball: {
+
       x: ball.x,
       y: ball.y,
+
       vx: ball.vx,
       vy: ball.vy
     },
-
 
     blueScore,
     orangeScore,
 
     gameTime,
 
-    bluePoints:
-      playerPoints,
-
-    orangePoints:
-      opponentPoints,
+    goalActive,
 
     gameRunning,
-    paused,
-    goalActive
+
+    bluePoints:
+      onlinePlayerNumber === 1
+        ? playerPoints
+        : 0,
+
+    orangePoints:
+      onlinePlayerNumber === 2
+        ? playerPoints
+        : 0
   };
 
+  socket.send(
+    JSON.stringify({
+      type: "game-state",
+      state
+    })
+  );
 
-  try {
+  lastNetworkSend = now;
 
-    socket.send(
-      JSON.stringify({
-        type: "game-state",
-        state
-      })
-    );
-
-  } catch {}
+  lastHeartbeat = now;
 }
 
+/* =========================================================
+   RÉCEPTION ÉTAT ONLINE
+========================================================= */
 
-function applyNetworkState(state) {
+function applyNetworkState(
+  state
+) {
 
-  if (!state) {
+  if (
+    !state ||
+    onlineHost
+  ) {
     return;
   }
 
-
-  const blue =
-    state.blue || {};
-
-  const orange =
-    state.orange || {};
-
-  const b =
-    state.ball || {};
-
-
   Object.assign(
     player,
-    {
-      x:
-        blue.x ??
-        player.x,
-
-      y:
-        blue.y ??
-        player.y,
-
-      angle:
-        blue.angle ??
-        player.angle,
-
-      speed:
-        blue.speed ??
-        player.speed,
-
-      boost:
-        blue.boost ??
-        player.boost,
-
-      boosting:
-        !!blue.boosting,
-
-      demolished:
-        !!blue.demolished,
-
-      demoTimer:
-        blue.demoTimer ??
-        0
-    }
+    state.player || {}
   );
-
 
   Object.assign(
     bot,
-    {
-      x:
-        orange.x ??
-        bot.x,
-
-      y:
-        orange.y ??
-        bot.y,
-
-      angle:
-        orange.angle ??
-        bot.angle,
-
-      speed:
-        orange.speed ??
-        bot.speed,
-
-      boost:
-        orange.boost ??
-        bot.boost,
-
-      boosting:
-        !!orange.boosting,
-
-      demolished:
-        !!orange.demolished,
-
-      demoTimer:
-        orange.demoTimer ??
-        0
-    }
+    state.bot || {}
   );
-
 
   Object.assign(
     ball,
-    {
-      x:
-        b.x ??
-        ball.x,
-
-      y:
-        b.y ??
-        ball.y,
-
-      vx:
-        b.vx ??
-        ball.vx,
-
-      vy:
-        b.vy ??
-        ball.vy
-    }
+    state.ball || {}
   );
 
-
   blueScore =
-    state.blueScore ??
-    blueScore;
+    state.blueScore || 0;
 
   orangeScore =
-    state.orangeScore ??
-    orangeScore;
-
-
-  gameTime =
-    state.gameTime ??
-    gameTime;
-
+    state.orangeScore || 0;
 
   if (
-    onlinePlayerNumber === 2
+    typeof state.gameTime ===
+    "number"
   ) {
 
-    playerPoints =
-      state.orangePoints ??
-      playerPoints;
-
-    opponentPoints =
-      state.bluePoints ??
-      opponentPoints;
-
-  } else {
-
-    playerPoints =
-      state.bluePoints ??
-      playerPoints;
-
-    opponentPoints =
-      state.orangePoints ??
-      opponentPoints;
+    gameTime =
+      state.gameTime;
   }
 
+  const wasGoal =
+    lastNetGoalActive;
 
-  updatePoints();
+  goalActive =
+    !!state.goalActive;
 
+  if (
+    goalActive &&
+    !wasGoal
+  ) {
+
+    goalMessage?.classList.remove(
+      "hidden"
+    );
+
+    setText(
+      goalText,
+      "GOAL!"
+    );
+  }
+
+  if (
+    !goalActive &&
+    wasGoal
+  ) {
+
+    goalMessage?.classList.add(
+      "hidden"
+    );
+  }
+
+  lastNetGoalActive =
+    goalActive;
 
   setText(
     blueScoreEl,
@@ -4212,817 +4796,209 @@ function applyNetworkState(state) {
     orangeScore
   );
 
-
   updateTimerDisplay();
 
+  playerPoints =
+    onlinePlayerNumber === 1
+      ? state.bluePoints || 0
+      : state.orangePoints || 0;
+
+  updatePoints();
 
   if (
-    !gameRunning &&
-    state.gameRunning
-  ) {
-
-    gameRunning = true;
-
-    paused =
-      !!state.paused;
-
-    goalActive =
-      !!state.goalActive;
-
-
-    mainMenu?.classList.add(
+    state.gameRunning ===
+      false &&
+    resultScreen?.classList.contains(
       "hidden"
-    );
-
-    resultScreen?.classList.add(
-      "hidden"
-    );
-  }
-}
-
-
-/* =========================================================
-   ARENA
-========================================================= */
-
-function drawArena() {
-
-  ctx.fillStyle =
-    "#06131f";
-
-  ctx.fillRect(
-    0,
-    0,
-    W,
-    H
-  );
-
-
-  /*
-    Grille
-  */
-
-  ctx.strokeStyle =
-    "rgba(80,180,255,.08)";
-
-  ctx.lineWidth = 1;
-
-
-  for (
-    let x = 0;
-    x < W;
-    x += 60
+    )
   ) {
 
-    ctx.beginPath();
+    gameRunning = false;
 
-    ctx.moveTo(x, 0);
+    paused = false;
 
-    ctx.lineTo(x, H);
+    goalActive = true;
 
-    ctx.stroke();
-  }
+    updateMobileVisibility();
 
+    let winner = "DRAW";
 
-  for (
-    let y = 0;
-    y < H;
-    y += 60
-  ) {
-
-    ctx.beginPath();
-
-    ctx.moveTo(0, y);
-
-    ctx.lineTo(W, y);
-
-    ctx.stroke();
-  }
-
-
-  /*
-    Terrain
-  */
-
-  ctx.strokeStyle =
-    "rgba(120,220,255,.35)";
-
-  ctx.lineWidth = 3;
-
-  ctx.strokeRect(
-    field.left,
-    field.top,
-    field.right -
-      field.left,
-    field.bottom -
-      field.top
-  );
-
-
-  /*
-    Ligne centrale
-  */
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    W / 2,
-    field.top
-  );
-
-  ctx.lineTo(
-    W / 2,
-    field.bottom
-  );
-
-  ctx.stroke();
-
-
-  /*
-    Cercle central
-  */
-
-  ctx.beginPath();
-
-  ctx.arc(
-    W / 2,
-    H / 2,
-    85,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.stroke();
-
-
-  ctx.fillStyle =
-    "#72eaff";
-
-  ctx.beginPath();
-
-  ctx.arc(
-    W / 2,
-    H / 2,
-    5,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.fill();
-
-
-  /*
-    Cages visibles.
-    Les zones de but restent invisibles.
-  */
-
-  ctx.lineWidth = 5;
-
-  ctx.shadowBlur = 18;
-
-
-  ctx.strokeStyle =
-    "#18cfff";
-
-  ctx.shadowColor =
-    "#00aaff";
-
-
-  ctx.strokeRect(
-    field.left -
-      goal.depth,
-    goal.top,
-    goal.depth,
-    goal.bottom -
-      goal.top
-  );
-
-
-  ctx.strokeStyle =
-    "#ff851b";
-
-  ctx.shadowColor =
-    "#ff5e00";
-
-
-  ctx.strokeRect(
-    field.right,
-    goal.top,
-    goal.depth,
-    goal.bottom -
-      goal.top
-  );
-
-
-  ctx.shadowBlur = 0;
-
-
-  drawBoostPads();
-}
-
-
-/* =========================================================
-   PADS VISUELS
-========================================================= */
-
-function drawBoostPads() {
-
-  for (const pad of boostPads) {
-
-    const available =
-      pad.cooldown <= 0;
-
-    const pulse =
-      1 +
-      Math.sin(
-        pad.pulse
-      ) * 0.08;
-
-
-    ctx.save();
-
-
-    ctx.translate(
-      pad.x,
-      pad.y
-    );
-
-
-    ctx.globalAlpha =
-      available
-        ? 1
-        : 0.35;
-
-
-    ctx.shadowColor =
-      pad.color;
-
-    ctx.shadowBlur =
-      available
-        ? 22
-        : 8;
-
-
-    ctx.fillStyle =
-      "rgba(8,18,30,.9)";
-
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-      0,
-      0,
-      28 * pulse,
-      16 * pulse,
-      0,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    ctx.fillStyle =
-      pad.color;
-
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-      0,
-      0,
-      19 * pulse,
-      8 * pulse,
-      0,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    ctx.strokeStyle =
-      "#fff";
-
-    ctx.lineWidth = 2;
-
-
-    ctx.beginPath();
-
-    ctx.arc(
-      0,
-      0,
-      23 * pulse,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.stroke();
-
-
-    if (pad.flash > 0) {
-
-      ctx.globalAlpha =
-        pad.flash;
-
-      ctx.strokeStyle =
-        "#fff";
-
-      ctx.lineWidth = 4;
-
-
-      ctx.beginPath();
-
-      ctx.arc(
-        0,
-        0,
-        32 +
-          (1 - pad.flash) *
-            18,
-        0,
-        Math.PI * 2
-      );
-
-      ctx.stroke();
+    if (
+      blueScore >
+      orangeScore
+    ) {
+      winner = "BLUE WINS";
     }
 
+    if (
+      orangeScore >
+      blueScore
+    ) {
+      winner = "ORANGE WINS";
+    }
 
-    ctx.restore();
+    setText(
+      winnerDisplay,
+      winner
+    );
+
+    setText(
+      finalBlueScore,
+      blueScore
+    );
+
+    setText(
+      finalOrangeScore,
+      orangeScore
+    );
+
+    resultScreen?.classList.remove(
+      "hidden"
+    );
   }
-
-
-  drawParticles(
-    boostParticles
-  );
 }
-
 
 /* =========================================================
-   PARTICULES VISUELLES
+   MENU ONLINE + HORS LIGNE
 ========================================================= */
 
-function drawParticles(list) {
+function setupOnlineMenu() {
 
-  for (const p of list) {
+  const onlineButton =
+    $("playButton");
 
-    ctx.save();
-
-    ctx.globalAlpha =
-      Math.max(
-        0,
-        Math.min(
-          1,
-          p.life
-        )
-      );
-
-    ctx.fillStyle =
-      p.color;
-
-    ctx.shadowColor =
-      p.color;
-
-    ctx.shadowBlur = 12;
-
-
-    ctx.beginPath();
-
-    ctx.arc(
-      p.x,
-      p.y,
-      p.size,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.restore();
-  }
-}
-
-
-function drawGoalEffects() {
-
-  drawParticles(
-    goalParticles
-  );
-
-  drawParticles(
-    demoParticles
-  );
-
-
-  if (goalFlash > 0) {
-
-    ctx.save();
-
-    ctx.globalAlpha =
-      goalFlash * 0.12;
-
-    ctx.fillStyle =
-      "#fff";
-
-    ctx.fillRect(
-      0,
-      0,
-      W,
-      H
-    );
-
-    ctx.restore();
+  if (!onlineButton) {
+    return;
   }
 
+  onlineButton.type =
+    "button";
 
-  if (demoFlash > 0) {
+  onlineButton.disabled =
+    false;
 
-    ctx.save();
+  onlineButton.textContent =
+    "1V1 EN LIGNE";
 
-    ctx.globalAlpha =
-      demoFlash * 0.15;
-
-    ctx.fillStyle =
-      "#fff";
-
-    ctx.fillRect(
-      0,
-      0,
-      W,
-      H
-    );
-
-    ctx.restore();
-  }
-}
-
-
-/* =========================================================
-   HUD
-========================================================= */
-
-function updateHUD() {
-
-  const car =
-    localCar();
-
-
-  if (boostFill) {
-
-    boostFill.style.width =
-      `${car.boost}%`;
-  }
-
-
-  setText(
-    boostNumber,
-    Math.floor(
-      car.boost
-    )
-  );
-
-
-  const speed =
-    Math.abs(
-      car.speed
-    );
-
-
-  const kmh =
-    car.boosting
-      ? Math.round(
-          Math.min(
-            83,
-            speed *
-              (83 / 11.7)
-          )
-        )
-      : Math.round(
-          Math.min(
-            51,
-            speed *
-              (51 / 7.2)
-          )
-        );
-
-
-  setText(
-    speedNumber,
-    kmh
-  );
-
+  onlineButton.onclick =
+    () => startOnlineSearch();
 
   /*
-    Balle :
-    9 unités = 216 km/h
+     JEU HORS LIGNE
   */
 
-  const ballKmh =
-    Math.round(
-      Math.min(
-        216,
-        Math.hypot(
-          ball.vx,
-          ball.vy
-        ) * 24
-      )
+  let offline =
+    $("offlinePlayButton");
+
+  if (!offline) {
+
+    offline =
+      document.createElement(
+        "button"
+      );
+
+    offline.id =
+      "offlinePlayButton";
+
+    offline.className =
+      onlineButton.className;
+
+    offline.type =
+      "button";
+
+    offline.style.marginTop =
+      "10px";
+
+    onlineButton.parentNode?.insertBefore(
+      offline,
+      onlineButton.nextSibling
     );
+  }
 
+  offline.disabled =
+    false;
 
-  setText(
-    ballSpeedEl,
-    ballKmh
-  );
+  offline.textContent =
+    "JEU HORS LIGNE";
+
+  offline.onclick =
+    () => {
+
+      if (onlineSearching) {
+        cancelOnlineSearch();
+      }
+
+      startMatch(
+        "offline"
+      );
+    };
 }
 
-
 /* =========================================================
-   OUTIL ROUND RECT
+   BOUTONS FIN DE MATCH
 ========================================================= */
-
-function roundRect(
-  x,
-  y,
-  w,
-  h,
-  r
-) {
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    x + r,
-    y
-  );
-
-  ctx.lineTo(
-    x + w - r,
-    y
-  );
-
-  ctx.quadraticCurveTo(
-    x + w,
-    y,
-    x + w,
-    y + r
-  );
-
-  ctx.lineTo(
-    x + w,
-    y + h - r
-  );
-
-  ctx.quadraticCurveTo(
-    x + w,
-    y + h,
-    x + w - r,
-    y + h
-  );
-
-  ctx.lineTo(
-    x + r,
-    y + h
-  );
-
-  ctx.quadraticCurveTo(
-    x,
-    y + h,
-    x,
-    y + h - r
-  );
-
-  ctx.lineTo(
-    x,
-    y + r
-  );
-
-  ctx.quadraticCurveTo(
-    x,
-    y,
-    x + r,
-    y
-  );
-
-  ctx.closePath();
-}
-
-
-/* =========================================================
-   BOUTONS PRINCIPAUX
-========================================================= */
-
-$("playButton")?.addEventListener(
-  "click",
-  startOffline
-);
-
 
 playAgainButton?.addEventListener(
   "click",
-  startMatch
-);
+  () => {
 
+    if (
+      gameMode ===
+      "multiplayer"
+    ) {
+
+      startOnlineSearch();
+
+    } else {
+
+      startMatch(
+        "offline"
+      );
+    }
+  }
+);
 
 mainMenuButton?.addEventListener(
   "click",
   showMainMenu
 );
 
-
 $("restartButton")?.addEventListener(
   "click",
-  startMatch
+  () =>
+    startMatch(
+      "offline"
+    )
 );
 
-
 /* =========================================================
-   GAME LOOP
+   HEARTBEAT SERVEUR
 ========================================================= */
 
-function gameLoop(now) {
-
-  const dt =
-    Math.min(
-      now - lastTime,
-      100
-    );
-
-  lastTime = now;
-
-
-  updateEffects(dt);
-
-  updateBoostPads(dt);
-
-
-  /*
-    ONLINE CLIENT
-  */
-
-  if (
-    gameMode === "multiplayer" &&
-    !isOnlineHost
-  ) {
-    /*
-      Le client ne simule pas la physique.
-      Il reçoit l'état du serveur.
-    */
-  }
-
-
-  /*
-    MATCH
-  */
-
-  if (
-    gameRunning &&
-    !paused &&
-    !goalActive
-  ) {
-
-
-    /*
-      OFFLINE
-    */
+setInterval(
+  () => {
 
     if (
-      gameMode === "offline"
+      socket &&
+      socket.readyState ===
+        WebSocket.OPEN
     ) {
 
-      player.update(dt);
-
-      bot.update(dt);
-
-      ball.update();
-
-      carBallCollision(
-        player
+      socket.send(
+        JSON.stringify({
+          type: "ping"
+        })
       );
-
-      carBallCollision(
-        bot
-      );
-
-      carCarCollision(
-        player,
-        bot
-      );
-
-      updateTimer(dt);
     }
-
-
-    /*
-      ONLINE HOST
-    */
-
-    else if (
-      gameMode === "multiplayer" &&
-      isOnlineHost
-    ) {
-
-      /*
-        Joueur 1 = bleu
-      */
-
-      player.update(dt);
-
-
-      /*
-        Joueur 2 = orange.
-        Le serveur utilise son input,
-        pas l'IA.
-      */
-
-      bot.updateFromNetworkInput(
-        opponentInput
-      );
-
-
-      ball.update();
-
-
-      carBallCollision(
-        player
-      );
-
-      carBallCollision(
-        bot
-      );
-
-      carCarCollision(
-        player,
-        bot
-      );
-
-
-      updateTimer(dt);
-
-
-      networkStateTimer += dt;
-
-
-      /*
-        Synchronisation fréquente
-      */
-
-      if (
-        networkStateTimer >= 50
-      ) {
-
-        networkStateTimer = 0;
-
-        sendNetworkState();
-      }
-    }
-
-
-    /*
-      ONLINE CLIENT
-    */
-
-    else {
-
-      sendInput();
-    }
-  }
-
-
-  /*
-    Dessin
-  */
-
-  drawArena();
-
-  ball.draw();
-
-  player.draw();
-
-  bot.draw();
-
-  drawGoalEffects();
-
-  updateHUD();
-
-
-  requestAnimationFrame(
-    gameLoop
-  );
-}
-
+  },
+  10000
+);
 
 /* =========================================================
    INITIALISATION
 ========================================================= */
 
-ensureMobileSystem();
-
-setupOnlineMenu();
-
 updateControlUI();
-
-updateMobileSettings();
-
-updateBoostSide();
 
 resetPoints();
 
@@ -5038,46 +5014,28 @@ bot.draw();
 
 updateHUD();
 
+/*
+   Création du système mobile.
+*/
+
+createMobileControls();
+
+ensureMobileSettings();
+
+updateMobileSettings();
 
 /*
-  Le choix PC / MOBILE
-  revient à chaque lancement.
+   Le choix PC/MOBILE est affiché
+   au démarrage pour pouvoir changer
+   d'appareil.
 */
 
 showDeviceChooser();
 
+updateMobileVisibility();
 
 /*
-  Heartbeat serveur
-*/
-
-setInterval(
-  () => {
-
-    if (
-      socket &&
-      socket.readyState ===
-        WebSocket.OPEN
-    ) {
-
-      try {
-
-        socket.send(
-          JSON.stringify({
-            type: "ping"
-          })
-        );
-
-      } catch {}
-    }
-
-  },
-  10000
-);
-
-
-/*
-  Lancement
+   Lancement de la boucle.
 */
 
 requestAnimationFrame(
