@@ -1,0 +1,12 @@
+{
+  "name": "rocket-league-io-server",
+  "version": "1.0.0",
+  "description": "Multiplayer server for Rocket League.io",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
