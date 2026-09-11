@@ -7,32 +7,55 @@ const H = canvas.height;
 
 const $ = id => document.getElementById(id);
 
+document.title = "Rocket League.io";
+
+/* =========================================================
+   UI
+========================================================= */
+
 const blueScoreEl = $("blueScore");
 const orangeScoreEl = $("orangeScore");
 const timerEl = $("timer");
+
 const goalMessage = $("goalMessage");
 const goalText = $("goalText");
 const goalScorer = $("goalScorer");
 const countdownEl = $("countdown");
+
 const pauseMenu = $("pauseMenu");
 const resultScreen = $("resultScreen");
 const winnerDisplay = $("winnerDisplay");
+
 const finalBlueScore = $("finalBlueScore");
 const finalOrangeScore = $("finalOrangeScore");
+
 const playAgainButton = $("playAgainButton");
 const mainMenuButton = $("mainMenuButton");
+
 const mainMenu = $("mainMenu");
 const howToPlayMenu = $("howToPlayMenu");
 const matchIntro = $("matchIntro");
+
 const pointsPanel = $("pointsPanel");
 const playerPointsEl = $("playerPoints");
 const pointsNotification = $("pointsNotification");
+
 const boostFill = $("boostFill");
 const boostNumber = $("boostNumber");
 const speedNumber = $("speedNumber");
 
+const ballSpeedEl =
+  $("ballSpeed") ||
+  $("ballSpeedNumber") ||
+  $("speedBallNumber");
+
 const settingsMenu = $("settingsMenu");
 const concedeConfirm = $("concedeConfirm");
+
+
+/* =========================================================
+   CONTRÔLES PC
+========================================================= */
 
 const defaults = {
   forward: "z",
@@ -42,22 +65,22 @@ const defaults = {
   boost: "space"
 };
 
-let controls = {...defaults};
+let controls = { ...defaults };
 
 try {
   const saved = JSON.parse(
     localStorage.getItem("turboball-controls") || "null"
   );
 
-  if (
-    saved &&
-    Object.keys(defaults).every(
-      k => typeof saved[k] === "string"
-    )
-  ) {
-    controls = {...defaults, ...saved};
+  if (saved) {
+    controls = {
+      ...defaults,
+      ...saved
+    };
   }
 } catch {}
+
+const keys = Object.create(null);
 
 const keyButtons = {
   forward: $("forwardKeyButton"),
@@ -77,13 +100,13 @@ const howButtons = {
 
 let waitingForAction = null;
 let settingsReturn = "main";
-const keys = Object.create(null);
 
 function keyName(key) {
-  if (key === " ") return "SPACE";
-  if (key === "space") return "SPACE";
-  if (key.length === 1) return key.toUpperCase();
-  return key.toUpperCase();
+  if (key === " " || key === "space") {
+    return "SPACE";
+  }
+
+  return String(key || "").toUpperCase();
 }
 
 function saveControls() {
@@ -96,29 +119,27 @@ function saveControls() {
 function updateControlUI() {
   for (const action of Object.keys(keyButtons)) {
     if (keyButtons[action]) {
-      keyButtons[action].textContent = keyName(controls[action]);
+      keyButtons[action].textContent =
+        keyName(controls[action]);
     }
 
     if (howButtons[action]) {
-      howButtons[action].textContent = keyName(controls[action]);
+      howButtons[action].textContent =
+        keyName(controls[action]);
     }
   }
 }
 
 function normalizedKey(e) {
-  if (e.code === "Space") return "space";
+  if (e.code === "Space") {
+    return "space";
+  }
+
   return e.key.toLowerCase();
 }
 
 function controlPressed(action) {
   return !!keys[controls[action]];
-}
-
-function localCar() {
-  return gameMode === "multiplayer" &&
-    onlinePlayerNumber === 2
-      ? bot
-      : player;
 }
 
 function clearKeys() {
@@ -127,154 +148,64 @@ function clearKeys() {
   }
 }
 
-document.addEventListener("keydown", e => {
-  if (waitingForAction) {
-    e.preventDefault();
 
-    if (e.key === "Escape") {
-      waitingForAction.textContent =
-        keyName(
-          controls[
-            waitingForAction.dataset.action
-          ]
-        );
+/* =========================================================
+   MODE APPAREIL
+========================================================= */
 
-      waitingForAction = null;
-      return;
-    }
+let deviceMode =
+  localStorage.getItem("rocketleague-device-mode") || "pc";
 
-    const action =
-      waitingForAction.dataset.action;
+let mobileMode = deviceMode === "mobile";
 
-    const newKey = normalizedKey(e);
+let mobileBoostSide =
+  localStorage.getItem(
+    "rocketleague-mobile-boost-side"
+  ) || "left";
 
-    if (
-      ["p", "escape"].includes(newKey) ||
-      newKey === ""
-    ) {
-      return;
-    }
+let mobileBoost = false;
 
-    const other = Object.keys(controls).find(
-      a =>
-        a !== action &&
-        controls[a] === newKey
-    );
+const mobileTouch = {
+  active: false,
+  x: 0,
+  y: 0,
+  cx: 0,
+  cy: 0
+};
 
-    if (other) return;
 
-    controls[action] = newKey;
-    saveControls();
-    updateControlUI();
+/* =========================================================
+   MODE JEU / ONLINE
+========================================================= */
 
-    waitingForAction = null;
-    return;
-  }
+let gameMode = "offline";
 
-  const k = normalizedKey(e);
+const ONLINE_SERVER_URL =
+  "wss://kyro-io.onrender.com";
 
-  if (k === "space") {
-    e.preventDefault();
-  }
+let socket = null;
+let onlineConnected = false;
+let onlinePlayerNumber = 0;
+let onlineMatchId = null;
+let isOnlineHost = false;
 
-  if (
-    gameRunning &&
-    !goalActive &&
-    k === "p"
-  ) {
-    togglePause();
-    return;
-  }
+let opponentInput = {};
 
-  keys[k] = true;
-});
+let networkStateTimer = 0;
 
-document.addEventListener("keyup", e => {
-  keys[normalizedKey(e)] = false;
-});
 
-window.addEventListener("blur", clearKeys);
-
-for (const action of Object.keys(keyButtons)) {
-  keyButtons[action]?.addEventListener(
-    "click",
-    () => {
-      if (waitingForAction) return;
-
-      waitingForAction = keyButtons[action];
-      waitingForAction.textContent = "PRESS A KEY";
-    }
-  );
-}
-
-$("resetControlsButton")?.addEventListener(
-  "click",
-  () => {
-    controls = {...defaults};
-    saveControls();
-    updateControlUI();
-  }
-);
-
-$("settingsButton")?.addEventListener(
-  "click",
-  () => openSettings("main")
-);
-
-$("pauseSettingsButton")?.addEventListener(
-  "click",
-  () => openSettings("pause")
-);
-
-function openSettings(from) {
-  settingsReturn = from;
-
-  mainMenu?.classList.add("hidden");
-  howToPlayMenu?.classList.add("hidden");
-  pauseMenu?.classList.add("hidden");
-
-  settingsMenu?.classList.remove("hidden");
-
-  updateControlUI();
-}
-
-$("settingsBackButton")?.addEventListener(
-  "click",
-  () => {
-    settingsMenu?.classList.add("hidden");
-
-    if (
-      settingsReturn === "pause" &&
-      gameRunning
-    ) {
-      pauseMenu?.classList.remove("hidden");
-    } else {
-      mainMenu?.classList.remove("hidden");
-    }
-  }
-);
-
-$("howToPlayButton")?.addEventListener(
-  "click",
-  () => {
-    mainMenu?.classList.add("hidden");
-    howToPlayMenu?.classList.remove("hidden");
-    updateControlUI();
-  }
-);
-
-$("backButton")?.addEventListener(
-  "click",
-  () => {
-    howToPlayMenu?.classList.add("hidden");
-    mainMenu?.classList.remove("hidden");
-  }
-);
+/* =========================================================
+   ÉTAT DU MATCH
+========================================================= */
 
 let blueScore = 0;
 let orangeScore = 0;
+
 let playerPoints = 0;
+let opponentPoints = 0;
+
 let gameTime = 120;
+
 let gameRunning = false;
 let paused = false;
 let goalActive = false;
@@ -283,100 +214,18 @@ let goalTimer = null;
 let countdownTimer = null;
 let countdownFinish = null;
 let introTimer = null;
+
 let lastTime = performance.now();
 
-/* =========================================
-   ONLINE 1V1 AUTOMATIQUE
-========================================= */
-
-const ONLINE_SERVER_URL =
-  "wss://kyro-io.onrender.com";
-
-let gameMode = "offline";
-
-let socket = null;
-let onlineSearching = false;
-let onlineHost = false;
-let onlinePlayerNumber = 0;
-let onlineMatchId = null;
-
-let remoteInput = {
-  forward: false,
-  reverse: false,
-  left: false,
-  right: false,
-  boost: false
-};
-
-let lastNetworkSend = 0;
-let lastHeartbeat = 0;
-let lastNetGoalActive = false;
-
-let reconnectTimer = null;
-let searchOverlay = null;
-
 let pointsTimer = null;
+
 let saveCooldown = 0;
 let saveDangerHandled = false;
 
-function setText(el, value) {
-  if (el) {
-    el.textContent = value;
-  }
-}
 
-function updatePoints() {
-  setText(playerPointsEl, playerPoints);
-}
-
-function awardPoints(amount, reason) {
-  playerPoints += amount;
-  updatePoints();
-
-  if (pointsNotification) {
-    clearTimeout(pointsTimer);
-
-    pointsNotification.textContent =
-      `+${amount} ${reason}`;
-
-    pointsNotification.classList.remove("show");
-
-    void pointsNotification.offsetWidth;
-
-    pointsNotification.classList.add("show");
-
-    pointsTimer = setTimeout(
-      () =>
-        pointsNotification.classList.remove(
-          "show"
-        ),
-      1100
-    );
-  }
-
-  pointsPanel?.classList.remove("earned");
-
-  if (pointsPanel) {
-    void pointsPanel.offsetWidth;
-    pointsPanel.classList.add("earned");
-  }
-}
-
-function resetPoints() {
-  playerPoints = 0;
-  saveCooldown = 0;
-  saveDangerHandled = false;
-
-  updatePoints();
-
-  pointsNotification?.classList.remove(
-    "show"
-  );
-}
-
-/* =========================================
+/* =========================================================
    TERRAIN
-========================================= */
+========================================================= */
 
 const field = {
   left: 90,
@@ -391,12 +240,10 @@ const goal = {
   depth: 70
 };
 
-const saveZone = {
-  x: field.left + 10,
-  y: goal.top + 12,
-  width: 145,
-  height: goal.bottom - goal.top - 24
-};
+
+/* =========================================================
+   BOOST PADS
+========================================================= */
 
 const boostPads = [
   {
@@ -407,6 +254,7 @@ const boostPads = [
     pulse: 0,
     flash: 0
   },
+
   {
     x: field.right - 85,
     y: field.top + 85,
@@ -415,6 +263,7 @@ const boostPads = [
     pulse: 1,
     flash: 0
   },
+
   {
     x: field.left + 85,
     y: field.bottom - 85,
@@ -423,6 +272,7 @@ const boostPads = [
     pulse: 2,
     flash: 0
   },
+
   {
     x: field.right - 85,
     y: field.bottom - 85,
@@ -431,6 +281,7 @@ const boostPads = [
     pulse: 3,
     flash: 0
   },
+
   {
     x: W / 2,
     y: field.top + 55,
@@ -439,6 +290,7 @@ const boostPads = [
     pulse: 4,
     flash: 0
   },
+
   {
     x: W / 2,
     y: field.bottom - 55,
@@ -449,21 +301,93 @@ const boostPads = [
   }
 ];
 
+
+/* =========================================================
+   PARTICULES
+========================================================= */
+
 const boostParticles = [];
 const goalParticles = [];
+const demoParticles = [];
 
 let goalFlash = 0;
+let demoFlash = 0;
 
-/* =========================================
-   VOITURE
-========================================= */
+
+/* =========================================================
+   POINTS
+========================================================= */
+
+function setText(element, value) {
+  if (element) {
+    element.textContent = value;
+  }
+}
+
+function updatePoints() {
+  setText(playerPointsEl, playerPoints);
+}
+
+function awardPoints(amount, reason) {
+  playerPoints += amount;
+
+  updatePoints();
+
+  if (pointsNotification) {
+    clearTimeout(pointsTimer);
+
+    pointsNotification.textContent =
+      `+${amount} ${reason}`;
+
+    pointsNotification.classList.remove("show");
+
+    void pointsNotification.offsetWidth;
+
+    pointsNotification.classList.add("show");
+
+    pointsTimer = setTimeout(() => {
+      pointsNotification.classList.remove("show");
+    }, 1100);
+  }
+
+  pointsPanel?.classList.remove("earned");
+
+  if (pointsPanel) {
+    void pointsPanel.offsetWidth;
+    pointsPanel.classList.add("earned");
+  }
+}
+
+function awardOpponentPoints(amount) {
+  opponentPoints += amount;
+}
+
+function resetPoints() {
+  playerPoints = 0;
+  opponentPoints = 0;
+
+  saveCooldown = 0;
+  saveDangerHandled = false;
+
+  updatePoints();
+
+  pointsNotification?.classList.remove("show");
+}
+
+
+/* =========================================================
+   CLASSES
+========================================================= */
 
 class Car {
+
   constructor(x, y, color, bot = false) {
+
     this.startX = x;
     this.startY = y;
 
     this.color = color;
+
     this.isBot = bot;
 
     this.radius = 25;
@@ -471,25 +395,34 @@ class Car {
     this.x = x;
     this.y = y;
 
-    this.angle = bot
-      ? Math.PI
-      : 0;
+    this.angle = bot ? Math.PI : 0;
 
     this.speed = 0;
 
+    /*
+      7.2 = environ 51 km/h
+      11.7 = environ 83 km/h
+    */
     this.maxSpeed = 7.2;
     this.boostMax = 11.7;
 
     this.boost = 100;
+
     this.boosting = false;
 
     this.ballContact = false;
 
     this.aiTarget = null;
     this.aiThink = 0;
+
+    this.demolished = false;
+    this.demoTimer = 0;
+    this.demoCooldown = 0;
   }
 
+
   reset() {
+
     this.x = this.startX;
     this.y = this.startY;
 
@@ -498,28 +431,56 @@ class Car {
       : 0;
 
     this.speed = 0;
+
     this.boost = 100;
+
     this.boosting = false;
 
     this.ballContact = false;
 
     this.aiTarget = null;
+
+    this.demolished = false;
+    this.demoTimer = 0;
   }
 
-  update() {
+
+  update(dt) {
+
+    if (this.demolished) {
+
+      this.demoTimer -= dt / 1000;
+
+      if (this.demoTimer <= 0) {
+        this.reset();
+      }
+
+      return;
+    }
+
     if (this.isBot) {
       this.updateAI();
     } else {
       this.updatePlayer();
     }
 
+    this.move();
+
+    this.demoCooldown =
+      Math.max(
+        0,
+        this.demoCooldown - dt / 1000
+      );
+  }
+
+
+  move() {
+
     this.x +=
-      Math.cos(this.angle) *
-      this.speed;
+      Math.cos(this.angle) * this.speed;
 
     this.y +=
-      Math.sin(this.angle) *
-      this.speed;
+      Math.sin(this.angle) * this.speed;
 
     this.speed *= 0.985;
 
@@ -536,49 +497,118 @@ class Car {
       );
   }
 
+
   updatePlayer() {
+
     this.boosting = false;
 
-    if (controlPressed("forward")) {
-      this.speed += 0.18;
-    }
+    if (mobileMode) {
 
-    if (controlPressed("reverse")) {
-      if (this.speed > 0) {
-        this.speed -= 0.25;
-      } else {
-        this.speed -= 0.12;
+      const dx =
+        mobileTouch.x -
+        mobileTouch.cx;
+
+      const dy =
+        mobileTouch.y -
+        mobileTouch.cy;
+
+      const distance =
+        Math.hypot(dx, dy);
+
+      if (
+        mobileTouch.active &&
+        distance > 8
+      ) {
+
+        const targetAngle =
+          Math.atan2(dy, dx);
+
+        let diff =
+          targetAngle -
+          this.angle;
+
+        while (diff > Math.PI) {
+          diff -= Math.PI * 2;
+        }
+
+        while (diff < -Math.PI) {
+          diff += Math.PI * 2;
+        }
+
+        this.angle +=
+          Math.max(
+            -0.09,
+            Math.min(
+              0.09,
+              diff
+            )
+          );
+
+        this.speed +=
+          Math.min(
+            0.22,
+            distance * 0.0028
+          );
+
+        if (distance > 35) {
+          this.speed += 0.04;
+        }
+      }
+
+    } else {
+
+      if (controlPressed("forward")) {
+        this.speed += 0.18;
+      }
+
+      if (controlPressed("reverse")) {
+
+        if (this.speed > 0) {
+          this.speed -= 0.25;
+        } else {
+          this.speed -= 0.12;
+        }
+      }
+
+      const turn =
+        0.055 *
+        Math.min(
+          Math.abs(this.speed) / 2 + 0.3,
+          1
+        );
+
+      if (controlPressed("left")) {
+        this.angle -=
+          turn *
+          (this.speed >= 0 ? 1 : -1);
+      }
+
+      if (controlPressed("right")) {
+        this.angle +=
+          turn *
+          (this.speed >= 0 ? 1 : -1);
       }
     }
 
-    const turn =
-      0.055 *
-      Math.min(
-        Math.abs(this.speed) / 2 + 0.3,
-        1
-      );
 
-    if (controlPressed("left")) {
-      this.angle -=
-        turn *
-        (this.speed >= 0 ? 1 : -1);
-    }
+    const boostPressed =
+      controlPressed("boost") ||
+      mobileBoost;
 
-    if (controlPressed("right")) {
-      this.angle +=
-        turn *
-        (this.speed >= 0 ? 1 : -1);
-    }
 
     if (
-      controlPressed("boost") &&
+      boostPressed &&
       this.boost > 0 &&
       this.speed > 0
     ) {
+
       this.speed += 0.28;
+
       this.boost -= 0.7;
+
       this.boosting = true;
     }
+
 
     this.speed =
       Math.max(
@@ -592,7 +622,9 @@ class Car {
       );
   }
 
-  updateRemote(input) {
+
+  updateFromNetworkInput(input) {
+
     this.boosting = false;
 
     if (input.forward) {
@@ -600,6 +632,7 @@ class Car {
     }
 
     if (input.reverse) {
+
       if (this.speed > 0) {
         this.speed -= 0.25;
       } else {
@@ -631,8 +664,11 @@ class Car {
       this.boost > 0 &&
       this.speed > 0
     ) {
+
       this.speed += 0.28;
+
       this.boost -= 0.7;
+
       this.boosting = true;
     }
 
@@ -646,29 +682,37 @@ class Car {
             : this.maxSpeed
         )
       );
+
+    this.move();
   }
 
+
   updateAI() {
-    const dxBall =
+
+    const dx =
       ball.x - this.x;
 
-    const dyBall =
+    const dy =
       ball.y - this.y;
 
-    const distBall =
-      Math.hypot(
-        dxBall,
-        dyBall
-      );
+    const dist =
+      Math.hypot(dx, dy);
 
     let tx = ball.x;
     let ty = ball.y;
 
-    if (
+    const dangerous =
       ball.x >
         field.right - 270 &&
-      ball.vx > 0
-    ) {
+      ball.vx > 0;
+
+
+    /*
+      Défense
+    */
+
+    if (dangerous) {
+
       tx =
         Math.min(
           field.right - 55,
@@ -677,40 +721,46 @@ class Car {
 
       ty =
         H / 2 +
-        (ball.y - H / 2) * 0.7;
+        (ball.y - H / 2) *
+        0.7;
 
-    } else if (
-      ball.x < W * 0.42
-    ) {
+    } else if (ball.x < W * 0.42) {
+
+      /*
+        Attaque
+      */
+
       tx = ball.x + 45;
       ty = ball.y;
     }
 
-    this.aiThink -= 1 / 60;
 
-    const dangerous =
-      ball.x >
-        field.right - 270 &&
-      ball.vx > 0;
+    /*
+      Recherche de boost
+    */
+
+    this.aiThink -= 1 / 60;
 
     if (
       this.boost < 25 &&
-      distBall > 180 &&
+      dist > 180 &&
       !dangerous
     ) {
+
       if (
         !this.aiTarget ||
         this.aiThink <= 0 ||
         this.aiTarget.cooldown > 0
       ) {
+
         let best = null;
         let bestD = Infinity;
 
-        for (
-          const pad of boostPads
-        ) {
-          if (pad.cooldown > 0)
+        for (const pad of boostPads) {
+
+          if (pad.cooldown > 0) {
             continue;
+          }
 
           const d =
             Math.hypot(
@@ -737,8 +787,14 @@ class Car {
       this.boost > 45 ||
       dangerous
     ) {
+
       this.aiTarget = null;
     }
+
+
+    /*
+      Direction
+    */
 
     const targetAngle =
       Math.atan2(
@@ -747,7 +803,8 @@ class Car {
       );
 
     let diff =
-      targetAngle - this.angle;
+      targetAngle -
+      this.angle;
 
     while (diff > Math.PI) {
       diff -= Math.PI * 2;
@@ -757,6 +814,7 @@ class Car {
       diff += Math.PI * 2;
     }
 
+
     const turn = 0.062;
 
     if (diff > 0.06) {
@@ -765,6 +823,7 @@ class Car {
       this.angle -= turn;
     }
 
+
     const aligned =
       Math.abs(diff) < 0.32;
 
@@ -772,14 +831,21 @@ class Car {
       ball.x < W * 0.55 &&
       this.x > ball.x;
 
+
+    /*
+      IA utilise le boost
+      jusqu'à 10.2
+    */
+
     this.boosting =
       this.boost > 4 &&
       aligned &&
       (
-        distBall > 260 ||
+        dist > 260 ||
         attack ||
         !!this.aiTarget
       );
+
 
     this.speed +=
       this.boosting
@@ -790,89 +856,80 @@ class Car {
       this.boost -= 0.55;
     }
 
+
     this.speed =
       Math.min(
         this.speed,
         this.boosting
-          ? 9.6
+          ? 10.2
           : 6.7
       );
 
-    if (this.aiTarget) {
-      const d =
-        Math.hypot(
-          this.aiTarget.x - this.x,
-          this.aiTarget.y - this.y
+
+    /*
+      Ramassage boost
+    */
+
+    if (
+      this.aiTarget &&
+      Math.hypot(
+        this.aiTarget.x - this.x,
+        this.aiTarget.y - this.y
+      ) <
+        this.radius + 22 &&
+      this.aiTarget.cooldown <= 0
+    ) {
+
+      this.boost =
+        Math.min(
+          100,
+          this.boost + 25
         );
 
-      if (
-        d <
-          this.radius + 22 &&
-        this.aiTarget.cooldown <= 0
-      ) {
-        this.boost =
-          Math.min(
-            100,
-            this.boost + 25
-          );
+      this.aiTarget.cooldown = 5;
+      this.aiTarget.flash = 1;
 
-        this.aiTarget.cooldown = 5;
-        this.aiTarget.flash = 1;
+      spawnPadParticles(
+        this.aiTarget
+      );
 
-        spawnPadParticles(
-          this.aiTarget
-        );
-
-        this.aiTarget = null;
-      }
+      this.aiTarget = null;
     }
   }
+
 
   keepInside() {
+
     const r = this.radius;
 
-    if (
-      this.x <
-      field.left + r
-    ) {
-      this.x =
-        field.left + r;
-
+    if (this.x < field.left + r) {
+      this.x = field.left + r;
       this.speed *= -0.3;
     }
 
-    if (
-      this.x >
-      field.right - r
-    ) {
-      this.x =
-        field.right - r;
-
+    if (this.x > field.right - r) {
+      this.x = field.right - r;
       this.speed *= -0.3;
     }
 
-    if (
-      this.y <
-      field.top + r
-    ) {
-      this.y =
-        field.top + r;
-
+    if (this.y < field.top + r) {
+      this.y = field.top + r;
       this.speed *= -0.3;
     }
 
-    if (
-      this.y >
-      field.bottom - r
-    ) {
-      this.y =
-        field.bottom - r;
-
+    if (this.y > field.bottom - r) {
+      this.y = field.bottom - r;
       this.speed *= -0.3;
     }
   }
 
+
   draw() {
+
+    if (this.demolished) {
+      return;
+    }
+
     ctx.save();
 
     ctx.translate(
@@ -880,34 +937,36 @@ class Car {
       this.y
     );
 
-    ctx.rotate(
-      this.angle
-    );
+    ctx.rotate(this.angle);
+
+
+    /*
+      Boost
+    */
 
     if (this.boosting) {
+
       ctx.fillStyle =
         "rgba(80,220,255,.7)";
 
       ctx.beginPath();
 
-      ctx.moveTo(
-        -35,
-        -11
-      );
+      ctx.moveTo(-35, -11);
 
       ctx.lineTo(
-        -65 -
-          Math.random() * 18,
+        -65 - Math.random() * 18,
         0
       );
 
-      ctx.lineTo(
-        -35,
-        11
-      );
+      ctx.lineTo(-35, 11);
 
       ctx.fill();
     }
+
+
+    /*
+      Voiture
+    */
 
     ctx.shadowColor =
       this.color;
@@ -927,6 +986,7 @@ class Car {
 
     ctx.fill();
 
+
     ctx.shadowBlur = 0;
 
     ctx.fillStyle =
@@ -942,8 +1002,8 @@ class Car {
 
     ctx.fill();
 
-    ctx.fillStyle =
-      "#fff";
+
+    ctx.fillStyle = "#fff";
 
     ctx.fillRect(
       20,
@@ -958,6 +1018,11 @@ class Car {
       5,
       7
     );
+
+
+    /*
+      Roues
+    */
 
     ctx.fillStyle =
       "#05070b";
@@ -994,17 +1059,23 @@ class Car {
   }
 }
 
-/* =========================================
+
+/* =========================================================
    BALLE
-========================================= */
+========================================================= */
 
 class Ball {
+
   constructor() {
+
     this.radius = 18;
+
     this.reset();
   }
 
+
   reset() {
+
     this.x = W / 2;
     this.y = H / 2;
 
@@ -1012,26 +1083,36 @@ class Ball {
     this.vy = 0;
   }
 
+
   update() {
+
     this.x += this.vx;
     this.y += this.vy;
 
     this.vx *= 0.992;
     this.vy *= 0.992;
 
-    const s =
+
+    /*
+      Vitesse max interne :
+      9 = 216 km/h
+    */
+
+    const speed =
       Math.hypot(
         this.vx,
         this.vy
       );
 
-    if (s > 9) {
+    if (speed > 9) {
+
       this.vx =
-        this.vx / s * 9;
+        this.vx / speed * 9;
 
       this.vy =
-        this.vy / s * 9;
+        this.vy / speed * 9;
     }
+
 
     this.checkGoal();
 
@@ -1040,81 +1121,95 @@ class Ball {
     }
   }
 
-  checkGoal() {
-    const inOpening =
-      this.y + this.radius >
-        goal.top &&
-      this.y - this.radius <
-        goal.bottom;
 
-    if (!inOpening) return;
+  checkGoal() {
+
+    const inOpening =
+      this.y + this.radius > goal.top &&
+      this.y - this.radius < goal.bottom;
+
+    if (!inOpening) {
+      return;
+    }
+
 
     if (
       this.x - this.radius <=
       field.left - 2
     ) {
+
       scoreGoal("orange");
 
     } else if (
       this.x + this.radius >=
       field.right + 2
     ) {
+
       scoreGoal("blue");
     }
   }
 
+
   walls() {
+
     if (
       this.y - this.radius <
       field.top
     ) {
+
       this.y =
-        field.top +
-        this.radius;
+        field.top + this.radius;
 
       this.vy *= -0.82;
     }
+
 
     if (
       this.y + this.radius >
       field.bottom
     ) {
+
       this.y =
-        field.bottom -
-        this.radius;
+        field.bottom - this.radius;
 
       this.vy *= -0.82;
     }
 
+
     const inOpening =
-      this.y + this.radius >
-        goal.top &&
-      this.y - this.radius <
-        goal.bottom;
+      this.y + this.radius > goal.top &&
+      this.y - this.radius < goal.bottom;
+
 
     if (
       this.x - this.radius <
         field.left &&
       !inOpening
     ) {
+
       this.x =
-        field.left +
-        this.radius;
+        field.left + this.radius;
 
       this.vx *= -0.82;
     }
+
 
     if (
       this.x + this.radius >
         field.right &&
       !inOpening
     ) {
+
       this.x =
-        field.right -
-        this.radius;
+        field.right - this.radius;
 
       this.vx *= -0.82;
     }
+
+
+    /*
+      Fond des cages
+    */
 
     if (
       inOpening &&
@@ -1123,6 +1218,7 @@ class Ball {
         goal.depth +
         this.radius
     ) {
+
       this.x =
         field.left -
         goal.depth +
@@ -1131,6 +1227,7 @@ class Ball {
       this.vx *= -0.82;
     }
 
+
     if (
       inOpening &&
       this.x >
@@ -1138,6 +1235,7 @@ class Ball {
         goal.depth -
         this.radius
     ) {
+
       this.x =
         field.right +
         goal.depth -
@@ -1147,12 +1245,12 @@ class Ball {
     }
   }
 
+
   draw() {
+
     ctx.save();
 
-    ctx.shadowColor =
-      "#fff";
-
+    ctx.shadowColor = "#fff";
     ctx.shadowBlur = 18;
 
     const g =
@@ -1198,6 +1296,11 @@ class Ball {
   }
 }
 
+
+/* =========================================================
+   OBJETS
+========================================================= */
+
 const player =
   new Car(
     350,
@@ -1213,55 +1316,128 @@ const bot =
     true
   );
 
-const ball =
-  new Ball();
+const ball = new Ball();
 
-/* =========================================
-   COLLISIONS
-========================================= */
 
-function carInSaveZone(car) {
+/* =========================================================
+   JOUEUR LOCAL
+========================================================= */
+
+function localCar() {
+
+  if (
+    gameMode === "multiplayer" &&
+    onlinePlayerNumber === 2
+  ) {
+    return bot;
+  }
+
+  return player;
+}
+
+function localTeam() {
+
+  if (
+    gameMode === "multiplayer" &&
+    onlinePlayerNumber === 2
+  ) {
+    return "orange";
+  }
+
+  return "blue";
+}
+
+
+/* =========================================================
+   SAVE
+========================================================= */
+
+function saveZoneFor(team) {
+
+  if (team === "blue") {
+
+    return {
+      x: field.left + 10,
+      y: goal.top + 12,
+      width: 145,
+      height:
+        goal.bottom -
+        goal.top -
+        24
+    };
+  }
+
+  return {
+    x: field.right - 155,
+    y: goal.top + 12,
+    width: 145,
+    height:
+      goal.bottom -
+      goal.top -
+      24
+  };
+}
+
+
+function carInSaveZone(car, team) {
+
+  const z =
+    saveZoneFor(team);
+
   return (
-    car.x >= saveZone.x &&
-    car.x <=
-      saveZone.x +
-      saveZone.width &&
-    car.y >= saveZone.y &&
-    car.y <=
-      saveZone.y +
-      saveZone.height
+    car.x >= z.x &&
+    car.x <= z.x + z.width &&
+    car.y >= z.y &&
+    car.y <= z.y + z.height
   );
 }
 
-function playerInSaveZone() {
-  return carInSaveZone(
-    localCar()
-  );
-}
 
-function ballDangerous() {
+function ballDangerousFor(team) {
+
   const inLane =
-    ball.y + ball.radius >
-      goal.top &&
-    ball.y - ball.radius <
-      goal.bottom;
+    ball.y + ball.radius > goal.top &&
+    ball.y - ball.radius < goal.bottom;
 
-  const close =
-    ball.x <
-    field.left + 250;
+
+  if (team === "blue") {
+
+    return (
+      inLane &&
+      ball.x <
+        field.left + 250 &&
+      (
+        ball.vx < -0.1 ||
+        ball.x <
+          field.left + 105
+      )
+    );
+  }
+
 
   return (
     inLane &&
-    close &&
+    ball.x >
+      field.right - 250 &&
     (
-      ball.vx < -0.1 ||
-      ball.x <
-        field.left + 105
+      ball.vx > 0.1 ||
+      ball.x >
+        field.right - 105
     )
   );
 }
 
+
+/* =========================================================
+   COLLISION BALLE
+========================================================= */
+
 function carBallCollision(car) {
+
+  if (car.demolished) {
+    return;
+  }
+
   const dx =
     ball.x - car.x;
 
@@ -1269,41 +1445,56 @@ function carBallCollision(car) {
     ball.y - car.y;
 
   const d =
-    Math.hypot(
-      dx,
-      dy
-    );
+    Math.hypot(dx, dy);
 
   const minD =
     car.radius +
     ball.radius;
 
+
   if (d >= minD) {
+
     car.ballContact = false;
+
     return;
   }
 
-  const isLocal =
-    car === localCar();
+
+  const team =
+    car === player
+      ? "blue"
+      : "orange";
 
   const dangerousBefore =
-    isLocal &&
-    ballDangerous();
+    ballDangerousFor(team);
 
   const newContact =
     !car.ballContact;
 
   car.ballContact = true;
 
-  if (
-    isLocal &&
-    newContact
-  ) {
-    awardPoints(
-      2,
-      "BALL TOUCH"
-    );
+
+  /*
+    Points contact
+  */
+
+  if (newContact) {
+
+    if (car === localCar()) {
+
+      awardPoints(
+        2,
+        "BALL TOUCH"
+      );
+
+    } else if (
+      gameMode === "multiplayer"
+    ) {
+
+      awardOpponentPoints(2);
+    }
   }
+
 
   const safeD =
     d || 0.001;
@@ -1317,11 +1508,10 @@ function carBallCollision(car) {
   const overlap =
     minD - d;
 
-  ball.x +=
-    nx * overlap;
 
-  ball.y +=
-    ny * overlap;
+  ball.x += nx * overlap;
+  ball.y += ny * overlap;
+
 
   const force =
     Math.min(
@@ -1331,11 +1521,10 @@ function carBallCollision(car) {
       7
     );
 
-  ball.vx +=
-    nx * force;
 
-  ball.vy +=
-    ny * force;
+  ball.vx += nx * force;
+  ball.vy += ny * force;
+
 
   ball.vx +=
     Math.cos(car.angle) *
@@ -1347,26 +1536,50 @@ function carBallCollision(car) {
     Math.abs(car.speed) *
     0.25;
 
+
   car.speed *= 0.82;
 
+
+  /*
+    SAVE
+  */
+
   if (
-    car === player &&
+    car === localCar() &&
     newContact &&
     dangerousBefore &&
-    playerInSaveZone() &&
+    carInSaveZone(
+      car,
+      team
+    ) &&
     saveCooldown <= 0
   ) {
+
     saveCooldown = 4;
+
     saveDangerHandled = true;
 
-    ball.vx =
-      Math.max(
-        1.8,
-        Math.abs(ball.vx) *
-          0.65
-      );
+
+    if (team === "blue") {
+
+      ball.vx =
+        Math.max(
+          1.8,
+          Math.abs(ball.vx) * 0.65
+        );
+
+    } else {
+
+      ball.vx =
+        -Math.max(
+          1.8,
+          Math.abs(ball.vx) * 0.65
+        );
+    }
+
 
     ball.vy *= 0.65;
+
 
     awardPoints(
       50,
@@ -1375,7 +1588,97 @@ function carBallCollision(car) {
   }
 }
 
+
+/* =========================================================
+   DÉMOLITIONS
+========================================================= */
+
+function demolish(attacker, victim) {
+
+  if (
+    attacker.demolished ||
+    victim.demolished
+  ) {
+    return;
+  }
+
+
+  if (
+    attacker.demoCooldown > 0
+  ) {
+    return;
+  }
+
+
+  /*
+    70 km/h minimum.
+
+    11.7 = 83 km/h
+    70 km/h = environ 9.86
+  */
+
+  const demolitionSpeed =
+    70 * (11.7 / 83);
+
+
+  if (
+    Math.abs(attacker.speed) <
+    demolitionSpeed
+  ) {
+    return;
+  }
+
+
+  const distance =
+    Math.hypot(
+      victim.x - attacker.x,
+      victim.y - attacker.y
+    );
+
+
+  if (
+    distance >
+    attacker.radius +
+    victim.radius +
+    3
+  ) {
+    return;
+  }
+
+
+  /*
+    SEULEMENT L'ADVERSAIRE
+    est démoli.
+  */
+
+  victim.demolished = true;
+
+  victim.demoTimer = 2.0;
+
+  victim.speed = 0;
+
+  spawnDemo(
+    victim.x,
+    victim.y,
+    attacker.color
+  );
+
+  attacker.demoCooldown = 1.1;
+
+  demoFlash = 1;
+}
+
+
 function carCarCollision(a, b) {
+
+  if (
+    a.demolished ||
+    b.demolished
+  ) {
+    return;
+  }
+
+
   const dx =
     b.x - a.x;
 
@@ -1383,14 +1686,12 @@ function carCarCollision(a, b) {
     b.y - a.y;
 
   const d =
-    Math.hypot(
-      dx,
-      dy
-    );
+    Math.hypot(dx, dy);
 
   const minD =
     a.radius +
     b.radius;
+
 
   if (
     d <= 0 ||
@@ -1399,14 +1700,46 @@ function carCarCollision(a, b) {
     return;
   }
 
-  const nx =
-    dx / d;
 
-  const ny =
-    dy / d;
+  /*
+    Démolition dans les deux sens :
+    joueur -> IA
+    IA -> joueur
+    joueur online -> adversaire
+  */
+
+  if (
+    Math.abs(a.speed) >=
+    70 * (11.7 / 83)
+  ) {
+
+    demolish(a, b);
+  }
+
+
+  if (
+    Math.abs(b.speed) >=
+    70 * (11.7 / 83)
+  ) {
+
+    demolish(b, a);
+  }
+
+
+  if (
+    a.demolished ||
+    b.demolished
+  ) {
+    return;
+  }
+
+
+  const nx = dx / d;
+  const ny = dy / d;
 
   const overlap =
     minD - d;
+
 
   a.x -=
     nx * overlap / 2;
@@ -1420,8 +1753,8 @@ function carCarCollision(a, b) {
   b.y +=
     ny * overlap / 2;
 
-  const av =
-    a.speed;
+
+  const av = a.speed;
 
   a.speed =
     b.speed * 0.55;
@@ -1429,40 +1762,39 @@ function carCarCollision(a, b) {
   b.speed =
     av * 0.55;
 
+
   a.keepInside();
   b.keepInside();
 }
 
-/* =========================================
+
+/* =========================================================
    PARTICULES
-========================================= */
+========================================================= */
 
 function spawnPadParticles(pad) {
-  for (
-    let i = 0;
-    i < 10;
-    i++
-  ) {
-    const a =
-      Math.PI *
-      2 *
-      i /
-      10;
 
-    const s =
+  for (let i = 0; i < 10; i++) {
+
+    const angle =
+      Math.PI * 2 * i / 10;
+
+    const speed =
       1.2 +
-      Math.random() *
-      1.4;
+      Math.random() * 1.4;
+
 
     boostParticles.push({
       x: pad.x,
       y: pad.y,
 
       vx:
-        Math.cos(a) * s,
+        Math.cos(angle) *
+        speed,
 
       vy:
-        Math.sin(a) * s,
+        Math.sin(angle) *
+        speed,
 
       life: 0.55,
 
@@ -1470,42 +1802,45 @@ function spawnPadParticles(pad) {
         2 +
         Math.random() * 2,
 
-      color:
-        pad.color
+      color: pad.color
     });
   }
 }
 
+
 function spawnGoalParticles(team) {
+
   const color =
     team === "blue"
       ? "#43d9ff"
       : "#ff9d2e";
 
-  for (
-    let i = 0;
-    i < 32;
-    i++
-  ) {
-    const a =
+
+  for (let i = 0; i < 32; i++) {
+
+    const angle =
       Math.random() *
       Math.PI *
       2;
 
-    const s =
+    const speed =
       1.5 +
       Math.random() *
       3.5;
 
+
     goalParticles.push({
+
       x: W / 2,
       y: H / 2,
 
       vx:
-        Math.cos(a) * s,
+        Math.cos(angle) *
+        speed,
 
       vy:
-        Math.sin(a) * s,
+        Math.sin(angle) *
+        speed,
 
       life: 1.1,
 
@@ -1518,29 +1853,90 @@ function spawnGoalParticles(team) {
   }
 }
 
+
+function spawnDemo(
+  x,
+  y,
+  color
+) {
+
+  for (let i = 0; i < 55; i++) {
+
+    const angle =
+      Math.random() *
+      Math.PI *
+      2;
+
+    const speed =
+      2 +
+      Math.random() *
+      5;
+
+
+    demoParticles.push({
+
+      x,
+      y,
+
+      vx:
+        Math.cos(angle) *
+        speed,
+
+      vy:
+        Math.sin(angle) *
+        speed,
+
+      life:
+        0.8 +
+        Math.random() *
+        0.7,
+
+      size:
+        2 +
+        Math.random() *
+        5,
+
+      color
+    });
+  }
+}
+
+
 function updateEffects(dt) {
+
   const sec =
     Math.min(
       dt / 1000,
       0.1
     );
 
+
   goalFlash =
     Math.max(
       0,
       goalFlash -
-        sec * 2.2
+      sec * 2.2
     );
+
+
+  demoFlash =
+    Math.max(
+      0,
+      demoFlash -
+      sec * 3
+    );
+
 
   for (
     const list of [
       boostParticles,
-      goalParticles
+      goalParticles,
+      demoParticles
     ]
   ) {
-    for (
-      const p of list
-    ) {
+
+    for (const p of list) {
+
       p.x += p.vx;
       p.y += p.vy;
 
@@ -1550,19 +1946,22 @@ function updateEffects(dt) {
       p.life -= sec;
     }
 
+
     for (
-      let i =
-        list.length - 1;
+      let i = list.length - 1;
       i >= 0;
       i--
     ) {
+
       if (
         list[i].life <= 0
       ) {
+
         list.splice(i, 1);
       }
     }
   }
+
 
   saveCooldown =
     Math.max(
@@ -1570,41 +1969,50 @@ function updateEffects(dt) {
       saveCooldown - sec
     );
 
-  if (!ballDangerous()) {
+
+  if (
+    !ballDangerousFor(
+      localTeam()
+    )
+  ) {
+
     saveDangerHandled = false;
   }
 }
 
-/* =========================================
-   BOOST
-========================================= */
+
+/* =========================================================
+   BOOST PADS
+========================================================= */
 
 function updateBoostPads(dt) {
+
   const sec =
     Math.min(
       dt / 1000,
       0.1
     );
 
-  for (
-    const p of boostPads
-  ) {
-    p.cooldown =
+
+  for (const pad of boostPads) {
+
+    pad.cooldown =
       Math.max(
         0,
-        p.cooldown - sec
+        pad.cooldown - sec
       );
 
-    p.pulse +=
+    pad.pulse +=
       sec * 2.4;
 
-    p.flash =
+    pad.flash =
       Math.max(
         0,
-        p.flash -
-          sec * 2.5
+        pad.flash -
+        sec * 2.5
       );
   }
+
 
   if (
     !gameRunning ||
@@ -1614,37 +2022,44 @@ function updateBoostPads(dt) {
     return;
   }
 
-  const cars =
-    gameMode === "multiplayer"
-      ? [player, bot]
-      : [localCar()];
 
-  for (
-    const p of boostPads
-  ) {
-    if (p.cooldown > 0)
+  for (const pad of boostPads) {
+
+    if (pad.cooldown > 0) {
       continue;
+    }
+
 
     for (
-      const car of cars
+      const car of [
+        player,
+        bot
+      ]
     ) {
+
+      if (car.demolished) {
+        continue;
+      }
+
+
       if (
         Math.hypot(
-          car.x - p.x,
-          car.y - p.y
+          car.x - pad.x,
+          car.y - pad.y
         ) <
         car.radius + 22
       ) {
+
         car.boost =
           Math.min(
             100,
             car.boost + 25
           );
 
-        p.cooldown = 5;
-        p.flash = 1;
+        pad.cooldown = 5;
+        pad.flash = 1;
 
-        spawnPadParticles(p);
+        spawnPadParticles(pad);
 
         break;
       }
@@ -1652,17 +2067,20 @@ function updateBoostPads(dt) {
   }
 }
 
-/* =========================================
+
+/* =========================================================
    BUT
-========================================= */
+========================================================= */
 
 function scoreGoal(team) {
+
   if (
     goalActive ||
     !gameRunning
   ) {
     return;
   }
+
 
   goalActive = true;
 
@@ -1672,7 +2090,9 @@ function scoreGoal(team) {
 
   spawnGoalParticles(team);
 
+
   if (team === "blue") {
+
     blueScore++;
 
     setText(
@@ -1680,15 +2100,21 @@ function scoreGoal(team) {
       blueScore
     );
 
+
     if (
-      gameMode === "offline" ||
-      onlinePlayerNumber === 1
+      localTeam() === "blue"
     ) {
+
       awardPoints(
         150,
         "GOAL"
       );
+
+    } else {
+
+      awardOpponentPoints(150);
     }
+
 
     setText(
       goalText,
@@ -1700,7 +2126,9 @@ function scoreGoal(team) {
       "BLUE UNIT SCORES"
     );
 
+
     if (goalText) {
+
       goalText.style.color =
         "#43d9ff";
 
@@ -1709,6 +2137,7 @@ function scoreGoal(team) {
     }
 
   } else {
+
     orangeScore++;
 
     setText(
@@ -1716,15 +2145,21 @@ function scoreGoal(team) {
       orangeScore
     );
 
+
     if (
-      gameMode === "multiplayer" &&
-      onlinePlayerNumber === 2
+      localTeam() === "orange"
     ) {
+
       awardPoints(
         150,
         "GOAL"
       );
+
+    } else {
+
+      awardOpponentPoints(150);
     }
+
 
     setText(
       goalText,
@@ -1736,7 +2171,9 @@ function scoreGoal(team) {
       "ORANGE CREW SCORES"
     );
 
+
     if (goalText) {
+
       goalText.style.color =
         "#ff9d2e";
 
@@ -1745,25 +2182,36 @@ function scoreGoal(team) {
     }
   }
 
+
   goalMessage?.classList.remove(
     "hidden"
   );
 
-  goalTimer =
-    setTimeout(
-      () => {
-        goalMessage?.classList.add(
-          "hidden"
-        );
 
-        resetPositions();
-        startCountdown();
-      },
-      1800
-    );
+  sendNetworkState();
+
+
+  goalTimer =
+    setTimeout(() => {
+
+      goalMessage?.classList.add(
+        "hidden"
+      );
+
+      resetPositions();
+
+      startCountdown();
+
+    }, 1800);
 }
 
+
+/* =========================================================
+   RESET / COUNTDOWN
+========================================================= */
+
 function resetPositions() {
+
   player.reset();
   bot.reset();
   ball.reset();
@@ -1771,7 +2219,9 @@ function resetPositions() {
   saveDangerHandled = false;
 }
 
+
 function startCountdown() {
+
   clearInterval(
     countdownTimer
   );
@@ -1780,9 +2230,11 @@ function startCountdown() {
     countdownFinish
   );
 
+
   goalActive = true;
 
   let count = 3;
+
 
   setText(
     countdownEl,
@@ -1793,51 +2245,57 @@ function startCountdown() {
     "hidden"
   );
 
+
   countdownTimer =
-    setInterval(
-      () => {
-        count--;
+    setInterval(() => {
 
-        if (count > 0) {
-          setText(
-            countdownEl,
-            count
-          );
+      count--;
 
-        } else {
-          clearInterval(
-            countdownTimer
-          );
 
-          countdownTimer = null;
+      if (count > 0) {
 
-          setText(
-            countdownEl,
-            "GO!"
-          );
+        setText(
+          countdownEl,
+          count
+        );
 
-          countdownFinish =
-            setTimeout(
-              () => {
-                countdownEl?.classList.add(
-                  "hidden"
-                );
+      } else {
 
-                goalActive = false;
-              },
-              700
+        clearInterval(
+          countdownTimer
+        );
+
+        countdownTimer = null;
+
+
+        setText(
+          countdownEl,
+          "GO!"
+        );
+
+
+        countdownFinish =
+          setTimeout(() => {
+
+            countdownEl?.classList.add(
+              "hidden"
             );
-        }
-      },
-      1000
-    );
+
+            goalActive = false;
+
+          }, 700);
+      }
+
+    }, 1000);
 }
 
-/* =========================================
-   TEMPS
-========================================= */
+
+/* =========================================================
+   TIMER
+========================================================= */
 
 function updateTimer(dt) {
+
   if (
     !gameRunning ||
     paused ||
@@ -1846,10 +2304,13 @@ function updateTimer(dt) {
     return;
   }
 
+
   gameTime -=
     dt / 1000;
 
+
   if (gameTime <= 0) {
+
     gameTime = 0;
 
     updateTimerDisplay();
@@ -1859,33 +2320,41 @@ function updateTimer(dt) {
     return;
   }
 
+
   updateTimerDisplay();
 }
 
+
 function updateTimerDisplay() {
-  const m =
+
+  const minutes =
     Math.floor(
       gameTime / 60
     );
 
-  const s =
+  const seconds =
     Math.floor(
       gameTime % 60
     );
 
+
   setText(
     timerEl,
-    `${m}:${String(s).padStart(2, "0")}`
+    `${minutes}:${String(
+      seconds
+    ).padStart(2, "0")}`
   );
 }
 
-/* =========================================
+
+/* =========================================================
    FIN DU MATCH
-========================================= */
+========================================================= */
 
 function endMatch(
   conceded = false
 ) {
+
   if (
     !gameRunning &&
     !conceded
@@ -1893,21 +2362,15 @@ function endMatch(
     return;
   }
 
-  if (
-    gameMode === "multiplayer" &&
-    onlineHost &&
-    socket &&
-    socket.readyState ===
-      WebSocket.OPEN
-  ) {
-    sendNetworkState(true);
-  }
 
   gameRunning = false;
+
   paused = false;
+
   goalActive = true;
 
   clearKeys();
+
 
   clearInterval(
     countdownTimer
@@ -1924,6 +2387,7 @@ function endMatch(
   clearTimeout(
     introTimer
   );
+
 
   pauseMenu?.classList.add(
     "hidden"
@@ -1945,54 +2409,62 @@ function endMatch(
     "hidden"
   );
 
-  if (conceded) {
-    setText(
-      winnerDisplay,
-      "ORANGE WINS"
-    );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
+  if (
+    gameMode === "multiplayer"
+  ) {
+
+    sendNetworkState();
+  }
+
+
+  const local =
+    localTeam();
+
+  let winner;
+
+
+  if (conceded) {
+
+    winner =
+      local === "blue"
+        ? "ORANGE WINS"
+        : "BLUE WINS";
 
   } else if (
     blueScore > orangeScore
   ) {
-    setText(
-      winnerDisplay,
-      "BLUE WINS"
-    );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#43cfff";
-    }
+    winner = "BLUE WINS";
 
   } else if (
     orangeScore > blueScore
   ) {
-    setText(
-      winnerDisplay,
-      "ORANGE WINS"
-    );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
+    winner = "ORANGE WINS";
 
   } else {
-    setText(
-      winnerDisplay,
-      "DRAW"
-    );
 
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#fff";
-    }
+    winner = "DRAW";
   }
+
+
+  setText(
+    winnerDisplay,
+    winner
+  );
+
+
+  if (winnerDisplay) {
+
+    winnerDisplay.style.color =
+      winner.startsWith("BLUE")
+        ? "#43cfff"
+        : winner.startsWith("ORANGE")
+          ? "#ff8a20"
+          : "#fff";
+  }
+
 
   setText(
     finalBlueScore,
@@ -2004,19 +2476,33 @@ function endMatch(
     orangeScore
   );
 
+
   resultScreen?.classList.remove(
     "hidden"
   );
 }
 
-/* =========================================
-   DÉBUT DU MATCH
-========================================= */
 
-function startMatch(
-  mode = gameMode
-) {
-  gameMode = mode;
+/* =========================================================
+   DÉMARRAGE MATCH
+========================================================= */
+
+function startMatch() {
+
+  if (
+    gameMode === "multiplayer" &&
+    !onlineConnected
+  ) {
+
+    showNetworkStatus(
+      "CONNEXION AU SERVEUR..."
+    );
+
+    connectOnline(true);
+
+    return;
+  }
+
 
   clearInterval(
     countdownTimer
@@ -2034,21 +2520,27 @@ function startMatch(
     introTimer
   );
 
+
   clearKeys();
 
   resetPoints();
 
+
   boostParticles.length = 0;
   goalParticles.length = 0;
+  demoParticles.length = 0;
+
 
   goalFlash = 0;
+  demoFlash = 0;
 
-  for (
-    const p of boostPads
-  ) {
-    p.cooldown = 0;
-    p.flash = 0;
+
+  for (const pad of boostPads) {
+
+    pad.cooldown = 0;
+    pad.flash = 0;
   }
+
 
   blueScore = 0;
   orangeScore = 0;
@@ -2056,8 +2548,11 @@ function startMatch(
   gameTime = 120;
 
   paused = false;
+
   gameRunning = true;
+
   goalActive = true;
+
 
   setText(
     blueScoreEl,
@@ -2069,9 +2564,11 @@ function startMatch(
     0
   );
 
+
   updateTimerDisplay();
 
   resetPositions();
+
 
   mainMenu?.classList.add(
     "hidden"
@@ -2097,32 +2594,56 @@ function startMatch(
     "hidden"
   );
 
+
   matchIntro?.classList.remove(
     "hidden"
   );
 
+
   introTimer =
-    setTimeout(
-      () => {
-        if (!gameRunning)
-          return;
+    setTimeout(() => {
 
-        matchIntro?.classList.add(
-          "hidden"
-        );
+      if (!gameRunning) {
+        return;
+      }
 
-        startCountdown();
-      },
-      900
-    );
+      matchIntro?.classList.add(
+        "hidden"
+      );
+
+      startCountdown();
+
+    }, 900);
 }
 
-/* =========================================
-   MENU
-========================================= */
+
+/* =========================================================
+   MENU PRINCIPAL
+========================================================= */
 
 function showMainMenu() {
-  stopOnline();
+
+  if (
+    socket &&
+    onlineConnected
+  ) {
+
+    try {
+
+      socket.send(
+        JSON.stringify({
+          type: "leave-match"
+        })
+      );
+
+    } catch {}
+  }
+
+
+  gameRunning = false;
+  paused = false;
+  goalActive = false;
+
 
   clearInterval(
     countdownTimer
@@ -2140,13 +2661,11 @@ function showMainMenu() {
     introTimer
   );
 
+
   clearKeys();
 
-  gameRunning = false;
-  paused = false;
-  goalActive = false;
-
   resetPoints();
+
 
   matchIntro?.classList.add(
     "hidden"
@@ -2180,12 +2699,19 @@ function showMainMenu() {
     "hidden"
   );
 
+
   mainMenu?.classList.remove(
     "hidden"
   );
 }
 
+
+/* =========================================================
+   PAUSE
+========================================================= */
+
 function togglePause() {
+
   if (
     !gameRunning ||
     goalActive
@@ -2193,9 +2719,11 @@ function togglePause() {
     return;
   }
 
+
   paused = !paused;
 
   clearKeys();
+
 
   pauseMenu?.classList.toggle(
     "hidden",
@@ -2203,11 +2731,14 @@ function togglePause() {
   );
 }
 
+
 $("resumeButton")?.addEventListener(
   "click",
   () => {
-    if (!gameRunning)
+
+    if (!gameRunning) {
       return;
+    }
 
     paused = false;
 
@@ -2219,30 +2750,36 @@ $("resumeButton")?.addEventListener(
   }
 );
 
+
 $("concedeButton")?.addEventListener(
   "click",
   () => {
-    if (!gameRunning)
-      return;
 
-    concedeConfirm?.classList.remove(
-      "hidden"
-    );
+    if (gameRunning) {
+
+      concedeConfirm?.classList.remove(
+        "hidden"
+      );
+    }
   }
 );
+
 
 $("cancelConcedeButton")?.addEventListener(
   "click",
   () => {
+
     concedeConfirm?.classList.add(
       "hidden"
     );
   }
 );
 
+
 $("confirmConcedeButton")?.addEventListener(
   "click",
   () => {
+
     concedeConfirm?.classList.add(
       "hidden"
     );
@@ -2251,16 +2788,1465 @@ $("confirmConcedeButton")?.addEventListener(
   }
 );
 
+
 $("pauseMainMenuButton")?.addEventListener(
   "click",
   showMainMenu
 );
 
-/* =========================================
-   ARÈNE
-========================================= */
+
+/* =========================================================
+   PARAMÈTRES
+========================================================= */
+
+$("settingsButton")?.addEventListener(
+  "click",
+  () => openSettings("main")
+);
+
+
+$("pauseSettingsButton")?.addEventListener(
+  "click",
+  () => openSettings("pause")
+);
+
+
+function openSettings(from) {
+
+  settingsReturn = from;
+
+  mainMenu?.classList.add(
+    "hidden"
+  );
+
+  howToPlayMenu?.classList.add(
+    "hidden"
+  );
+
+  pauseMenu?.classList.add(
+    "hidden"
+  );
+
+  settingsMenu?.classList.remove(
+    "hidden"
+  );
+
+
+  updateControlUI();
+
+  updateMobileSettings();
+}
+
+
+$("settingsBackButton")?.addEventListener(
+  "click",
+  () => {
+
+    settingsMenu?.classList.add(
+      "hidden"
+    );
+
+
+    if (
+      settingsReturn === "pause" &&
+      gameRunning
+    ) {
+
+      pauseMenu?.classList.remove(
+        "hidden"
+      );
+
+    } else {
+
+      mainMenu?.classList.remove(
+        "hidden"
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   COMMENT JOUER
+========================================================= */
+
+$("howToPlayButton")?.addEventListener(
+  "click",
+  () => {
+
+    mainMenu?.classList.add(
+      "hidden"
+    );
+
+    howToPlayMenu?.classList.remove(
+      "hidden"
+    );
+
+    updateControlUI();
+  }
+);
+
+
+$("backButton")?.addEventListener(
+  "click",
+  () => {
+
+    howToPlayMenu?.classList.add(
+      "hidden"
+    );
+
+    mainMenu?.classList.remove(
+      "hidden"
+    );
+  }
+);
+
+
+/* =========================================================
+   REMAPPING CLAVIER
+========================================================= */
+
+for (
+  const action of Object.keys(keyButtons)
+) {
+
+  keyButtons[action]?.addEventListener(
+    "click",
+    () => {
+
+      if (waitingForAction) {
+        return;
+      }
+
+
+      waitingForAction =
+        keyButtons[action];
+
+      waitingForAction.dataset.action =
+        action;
+
+      waitingForAction.textContent =
+        "PRESS A KEY";
+    }
+  );
+}
+
+
+$("resetControlsButton")?.addEventListener(
+  "click",
+  () => {
+
+    controls = {
+      ...defaults
+    };
+
+    saveControls();
+
+    updateControlUI();
+  }
+);
+
+
+document.addEventListener(
+  "keydown",
+  e => {
+
+    if (waitingForAction) {
+
+      e.preventDefault();
+
+
+      if (e.key === "Escape") {
+
+        waitingForAction.textContent =
+          keyName(
+            controls[
+              waitingForAction.dataset.action
+            ]
+          );
+
+        waitingForAction = null;
+
+        return;
+      }
+
+
+      const action =
+        waitingForAction.dataset.action;
+
+      const newKey =
+        normalizedKey(e);
+
+
+      if (
+        !newKey ||
+        newKey === "p" ||
+        newKey === "escape"
+      ) {
+        return;
+      }
+
+
+      const alreadyUsed =
+        Object.keys(controls).some(
+          other =>
+            other !== action &&
+            controls[other] === newKey
+        );
+
+
+      if (alreadyUsed) {
+        return;
+      }
+
+
+      controls[action] =
+        newKey;
+
+      saveControls();
+
+      updateControlUI();
+
+      waitingForAction = null;
+
+      return;
+    }
+
+
+    const k =
+      normalizedKey(e);
+
+
+    if (k === "space") {
+      e.preventDefault();
+    }
+
+
+    if (
+      gameRunning &&
+      !goalActive &&
+      k === "p" &&
+      !mobileMode
+    ) {
+
+      togglePause();
+
+      return;
+    }
+
+
+    keys[k] = true;
+  }
+);
+
+
+document.addEventListener(
+  "keyup",
+  e => {
+
+    keys[
+      normalizedKey(e)
+    ] = false;
+  }
+);
+
+
+window.addEventListener(
+  "blur",
+  clearKeys
+);
+
+
+/* =========================================================
+   APPAREIL / MOBILE
+========================================================= */
+
+function ensureMobileSystem() {
+
+  /*
+    CSS dynamique
+  */
+
+  const style =
+    document.createElement("style");
+
+  style.textContent = `
+
+    #deviceChooser {
+      position: fixed;
+      inset: 0;
+      background: rgba(2,8,16,.97);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+
+    #deviceChooser.hidden {
+      display: none;
+    }
+
+    .device-box {
+      text-align: center;
+      padding: 35px;
+      border: 1px solid #36d8ff;
+      border-radius: 20px;
+      box-shadow:
+        0 0 40px rgba(0,200,255,.2);
+      background: #081522;
+    }
+
+    .device-box h1 {
+      margin-bottom: 25px;
+    }
+
+    .device-box button,
+    .online-btn,
+    .mobile-boost-btn,
+    .mobile-pause-btn {
+      border: 1px solid #36d8ff;
+      background: #0a2030;
+      color: #fff;
+      border-radius: 12px;
+      padding: 14px 22px;
+      font-weight: 800;
+      cursor: pointer;
+      margin: 6px;
+    }
+
+    .online-status {
+      font-size: 13px;
+      margin-top: 10px;
+      color: #7deaff;
+    }
+
+    .mobile-controls {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .mobile-controls.hidden {
+      display: none;
+    }
+
+    .mobile-touchpad {
+      position: absolute;
+      inset: 0;
+      pointer-events: auto;
+      touch-action: none;
+      background: transparent;
+    }
+
+    .mobile-boost-btn,
+    .mobile-pause-btn {
+      position: absolute;
+      z-index: 21;
+      pointer-events: auto;
+      background:
+        rgba(5,25,40,.78);
+      box-shadow:
+        0 0 25px rgba(0,200,255,.25);
+    }
+
+    .mobile-boost-btn {
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      font-size: 15px;
+    }
+
+    .mobile-pause-btn {
+      top: 15px;
+      right: 15px;
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+    }
+
+    .mobile-boost-btn.left {
+      left: 20px;
+      bottom: 22px;
+    }
+
+    .mobile-boost-btn.right {
+      right: 20px;
+      bottom: 22px;
+    }
+
+    .mobile-settings-row {
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top:
+        1px solid rgba(255,255,255,.12);
+    }
+
+    .mobile-settings-row button {
+      padding: 9px 12px;
+    }
+
+  `;
+
+  document.head.appendChild(style);
+
+
+  /*
+    Choix PC / MOBILE
+  */
+
+  let chooser =
+    document.getElementById(
+      "deviceChooser"
+    );
+
+
+  if (!chooser) {
+
+    chooser =
+      document.createElement("div");
+
+    chooser.id =
+      "deviceChooser";
+
+
+    chooser.innerHTML = `
+      <div class="device-box">
+        <h1>ROCKET LEAGUE.IO</h1>
+        <p>CHOISIS TON APPAREIL</p>
+
+        <button id="devicePC">
+          💻 PC
+        </button>
+
+        <button id="deviceMobile">
+          📱 MOBILE
+        </button>
+      </div>
+    `;
+
+
+    document.body.appendChild(
+      chooser
+    );
+  }
+
+
+  $("#devicePC").onclick =
+    () => setDevice("pc");
+
+  $("#deviceMobile").onclick =
+    () => setDevice("mobile");
+
+
+  /*
+    Contrôles mobiles
+  */
+
+  let mobileControls =
+    document.getElementById(
+      "mobileControls"
+    );
+
+
+  if (!mobileControls) {
+
+    mobileControls =
+      document.createElement("div");
+
+    mobileControls.id =
+      "mobileControls";
+
+    mobileControls.className =
+      "mobile-controls";
+
+
+    mobileControls.innerHTML = `
+      <div
+        id="mobileTouchpad"
+        class="mobile-touchpad">
+      </div>
+
+      <button
+        id="mobilePause"
+        class="mobile-pause-btn">
+        Ⅱ
+      </button>
+
+      <button
+        id="mobileBoost"
+        class="mobile-boost-btn">
+        BOOST
+      </button>
+    `;
+
+
+    document.body.appendChild(
+      mobileControls
+    );
+  }
+
+
+  const pad =
+    $("mobileTouchpad");
+
+
+  const stopTouch = () => {
+
+    mobileTouch.active = false;
+
+    mobileTouch.x =
+      mobileTouch.cx;
+
+    mobileTouch.y =
+      mobileTouch.cy;
+  };
+
+
+  pad.addEventListener(
+    "pointerdown",
+    e => {
+
+      mobileTouch.active = true;
+
+      mobileTouch.cx =
+        e.clientX;
+
+      mobileTouch.cy =
+        e.clientY;
+
+      mobileTouch.x =
+        e.clientX;
+
+      mobileTouch.y =
+        e.clientY;
+
+
+      pad.setPointerCapture?.(
+        e.pointerId
+      );
+    }
+  );
+
+
+  pad.addEventListener(
+    "pointermove",
+    e => {
+
+      if (
+        mobileTouch.active
+      ) {
+
+        mobileTouch.x =
+          e.clientX;
+
+        mobileTouch.y =
+          e.clientY;
+      }
+    }
+  );
+
+
+  pad.addEventListener(
+    "pointerup",
+    stopTouch
+  );
+
+  pad.addEventListener(
+    "pointercancel",
+    stopTouch
+  );
+
+
+  const boostButton =
+    $("mobileBoost");
+
+
+  boostButton.addEventListener(
+    "pointerdown",
+    e => {
+
+      e.preventDefault();
+
+      mobileBoost = true;
+    }
+  );
+
+
+  boostButton.addEventListener(
+    "pointerup",
+    () => {
+
+      mobileBoost = false;
+    }
+  );
+
+
+  boostButton.addEventListener(
+    "pointercancel",
+    () => {
+
+      mobileBoost = false;
+    }
+  );
+
+
+  $("mobilePause").addEventListener(
+    "click",
+    togglePause
+  );
+}
+
+
+function setDevice(mode) {
+
+  deviceMode = mode;
+
+  mobileMode =
+    mode === "mobile";
+
+
+  localStorage.setItem(
+    "rocketleague-device-mode",
+    mode
+  );
+
+
+  $("#deviceChooser")?.classList.add(
+    "hidden"
+  );
+
+
+  $("#mobileControls")?.classList.toggle(
+    "hidden",
+    !mobileMode
+  );
+
+
+  updateMobileSettings();
+
+  updateBoostSide();
+}
+
+
+function showDeviceChooser() {
+
+  $("#deviceChooser")?.classList.remove(
+    "hidden"
+  );
+
+
+  $("#mobileControls")?.classList.add(
+    "hidden"
+  );
+}
+
+
+/* =========================================================
+   SETTINGS MOBILE
+========================================================= */
+
+function updateMobileSettings() {
+
+  if (!settingsMenu) {
+    return;
+  }
+
+
+  let box =
+    document.getElementById(
+      "mobileSettingsBox"
+    );
+
+
+  if (!box) {
+
+    box =
+      document.createElement("div");
+
+    box.id =
+      "mobileSettingsBox";
+
+    box.className =
+      "mobile-settings-row";
+
+    settingsMenu.appendChild(
+      box
+    );
+  }
+
+
+  box.innerHTML = `
+
+    <b>📱 MOBILE</b>
+    <br>
+
+    <button id="boostLeftBtn">
+      BOOST GAUCHE
+    </button>
+
+    <button id="boostRightBtn">
+      BOOST DROITE
+    </button>
+
+    <button id="resetMobileButton">
+      RESET MOBILE
+    </button>
+  `;
+
+
+  box.style.display =
+    mobileMode
+      ? "block"
+      : "none";
+
+
+  $("#boostLeftBtn")?.addEventListener(
+    "click",
+    () => {
+
+      mobileBoostSide = "left";
+
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "left"
+      );
+
+      updateBoostSide();
+    }
+  );
+
+
+  $("#boostRightBtn")?.addEventListener(
+    "click",
+    () => {
+
+      mobileBoostSide = "right";
+
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "right"
+      );
+
+      updateBoostSide();
+    }
+  );
+
+
+  $("#resetMobileButton")?.addEventListener(
+    "click",
+    () => {
+
+      mobileBoostSide = "left";
+
+      localStorage.setItem(
+        "rocketleague-mobile-boost-side",
+        "left"
+      );
+
+      updateBoostSide();
+    }
+  );
+
+
+  updateBoostSide();
+}
+
+
+function updateBoostSide() {
+
+  const button =
+    $("mobileBoost");
+
+  if (!button) {
+    return;
+  }
+
+
+  button.classList.remove(
+    "left",
+    "right"
+  );
+
+
+  button.classList.add(
+    mobileBoostSide
+  );
+}
+
+
+/* =========================================================
+   MENU ONLINE
+========================================================= */
+
+function setupOnlineMenu() {
+
+  const offlineButton =
+    $("playButton");
+
+
+  if (!offlineButton) {
+    return;
+  }
+
+
+  if (
+    document.getElementById(
+      "onlinePlayButton"
+    )
+  ) {
+    return;
+  }
+
+
+  const onlineButton =
+    offlineButton.cloneNode(true);
+
+
+  onlineButton.id =
+    "onlinePlayButton";
+
+  onlineButton.textContent =
+    "1V1 EN LIGNE";
+
+
+  offlineButton.parentNode?.insertBefore(
+    onlineButton,
+    offlineButton
+  );
+
+
+  offlineButton.textContent =
+    "JEU HORS LIGNE";
+
+
+  const status =
+    document.createElement("div");
+
+
+  status.id =
+    "onlineStatus";
+
+  status.className =
+    "online-status";
+
+
+  offlineButton.parentNode?.insertBefore(
+    status,
+    offlineButton.nextSibling
+  );
+
+
+  onlineButton.addEventListener(
+    "click",
+    startOnlineSearch
+  );
+}
+
+
+function showNetworkStatus(text) {
+
+  setText(
+    $("onlineStatus"),
+    text
+  );
+}
+
+
+function startOffline() {
+
+  gameMode = "offline";
+
+  onlinePlayerNumber = 0;
+
+  onlineMatchId = null;
+
+  startMatch();
+}
+
+
+function startOnlineSearch() {
+
+  gameMode = "multiplayer";
+
+  gameRunning = false;
+
+  showNetworkStatus(
+    "RECHERCHE D'UN ADVERSAIRE..."
+  );
+
+
+  connectOnline(false);
+}
+
+
+/* =========================================================
+   WEBSOCKET
+========================================================= */
+
+function connectOnline(
+  startImmediately
+) {
+
+  if (
+    socket &&
+    socket.readyState ===
+      WebSocket.OPEN
+  ) {
+
+    socket.send(
+      JSON.stringify({
+        type: "find-match"
+      })
+    );
+
+    return;
+  }
+
+
+  try {
+
+    socket =
+      new WebSocket(
+        ONLINE_SERVER_URL
+      );
+
+  } catch {
+
+    showNetworkStatus(
+      "SERVEUR INDISPONIBLE"
+    );
+
+    return;
+  }
+
+
+  socket.addEventListener(
+    "open",
+    () => {
+
+      onlineConnected = true;
+
+
+      showNetworkStatus(
+        "RECHERCHE D'UN ADVERSAIRE..."
+      );
+
+
+      socket.send(
+        JSON.stringify({
+          type: "find-match"
+        })
+      );
+    }
+  );
+
+
+  socket.addEventListener(
+    "message",
+    e => {
+
+      let data;
+
+      try {
+
+        data =
+          JSON.parse(
+            e.data
+          );
+
+      } catch {
+
+        return;
+      }
+
+
+      handleNetworkMessage(
+        data
+      );
+    }
+  );
+
+
+  socket.addEventListener(
+    "close",
+    () => {
+
+      onlineConnected = false;
+
+
+      if (
+        gameRunning &&
+        gameMode ===
+          "multiplayer"
+      ) {
+
+        showNetworkStatus(
+          "ADVERSAIRE DÉCONNECTÉ"
+        );
+
+        endMatch(false);
+      }
+    }
+  );
+
+
+  socket.addEventListener(
+    "error",
+    () => {
+
+      showNetworkStatus(
+        "ERREUR SERVEUR"
+      );
+    }
+  );
+}
+
+
+/* =========================================================
+   RÉCEPTION ONLINE
+========================================================= */
+
+function handleNetworkMessage(data) {
+
+  if (
+    data.type === "connected"
+  ) {
+    return;
+  }
+
+
+  if (
+    data.type === "searching"
+  ) {
+
+    showNetworkStatus(
+      "RECHERCHE D'UN ADVERSAIRE..."
+    );
+
+    return;
+  }
+
+
+  if (
+    data.type === "match-found"
+  ) {
+
+    onlineMatchId =
+      data.matchId;
+
+    onlinePlayerNumber =
+      data.playerNumber;
+
+    isOnlineHost =
+      data.isHost;
+
+
+    showNetworkStatus(
+      `MATCH TROUVÉ — ${data.team.toUpperCase()}`
+    );
+
+
+    startMatch();
+
+    return;
+  }
+
+
+  if (
+    data.type ===
+      "search-cancelled"
+  ) {
+
+    showNetworkStatus("");
+
+    return;
+  }
+
+
+  if (
+    data.type ===
+      "opponent-input"
+  ) {
+
+    opponentInput =
+      data.input || {};
+
+    return;
+  }
+
+
+  if (
+    data.type ===
+      "game-state" &&
+    !isOnlineHost
+  ) {
+
+    applyNetworkState(
+      data.state
+    );
+
+    return;
+  }
+
+
+  if (
+    data.type ===
+      "opponent-left"
+  ) {
+
+    showNetworkStatus(
+      "ADVERSAIRE DÉCONNECTÉ"
+    );
+
+    endMatch(false);
+  }
+}
+
+
+/* =========================================================
+   INPUT ONLINE
+========================================================= */
+
+function sendInput() {
+
+  if (
+    !onlineConnected ||
+    !socket ||
+    socket.readyState !==
+      WebSocket.OPEN
+  ) {
+    return;
+  }
+
+
+  const input = {
+
+    forward:
+      controlPressed(
+        "forward"
+      ),
+
+    reverse:
+      controlPressed(
+        "reverse"
+      ),
+
+    left:
+      controlPressed(
+        "left"
+      ),
+
+    right:
+      controlPressed(
+        "right"
+      ),
+
+    boost:
+      controlPressed(
+        "boost"
+      ) ||
+      mobileBoost
+  };
+
+
+  try {
+
+    socket.send(
+      JSON.stringify({
+        type: "input",
+        input
+      })
+    );
+
+  } catch {}
+}
+
+
+/* =========================================================
+   ÉTAT ONLINE
+========================================================= */
+
+function sendNetworkState() {
+
+  if (
+    gameMode !==
+      "multiplayer" ||
+    !isOnlineHost ||
+    !socket ||
+    socket.readyState !==
+      WebSocket.OPEN
+  ) {
+    return;
+  }
+
+
+  const state = {
+
+    blue: {
+      x: player.x,
+      y: player.y,
+      angle: player.angle,
+      speed: player.speed,
+      boost: player.boost,
+      boosting: player.boosting,
+      demolished:
+        player.demolished,
+      demoTimer:
+        player.demoTimer
+    },
+
+
+    orange: {
+      x: bot.x,
+      y: bot.y,
+      angle: bot.angle,
+      speed: bot.speed,
+      boost: bot.boost,
+      boosting: bot.boosting,
+      demolished:
+        bot.demolished,
+      demoTimer:
+        bot.demoTimer
+    },
+
+
+    ball: {
+      x: ball.x,
+      y: ball.y,
+      vx: ball.vx,
+      vy: ball.vy
+    },
+
+
+    blueScore,
+    orangeScore,
+
+    gameTime,
+
+    bluePoints:
+      playerPoints,
+
+    orangePoints:
+      opponentPoints,
+
+    gameRunning,
+    paused,
+    goalActive
+  };
+
+
+  try {
+
+    socket.send(
+      JSON.stringify({
+        type: "game-state",
+        state
+      })
+    );
+
+  } catch {}
+}
+
+
+function applyNetworkState(state) {
+
+  if (!state) {
+    return;
+  }
+
+
+  const blue =
+    state.blue || {};
+
+  const orange =
+    state.orange || {};
+
+  const b =
+    state.ball || {};
+
+
+  Object.assign(
+    player,
+    {
+      x:
+        blue.x ??
+        player.x,
+
+      y:
+        blue.y ??
+        player.y,
+
+      angle:
+        blue.angle ??
+        player.angle,
+
+      speed:
+        blue.speed ??
+        player.speed,
+
+      boost:
+        blue.boost ??
+        player.boost,
+
+      boosting:
+        !!blue.boosting,
+
+      demolished:
+        !!blue.demolished,
+
+      demoTimer:
+        blue.demoTimer ??
+        0
+    }
+  );
+
+
+  Object.assign(
+    bot,
+    {
+      x:
+        orange.x ??
+        bot.x,
+
+      y:
+        orange.y ??
+        bot.y,
+
+      angle:
+        orange.angle ??
+        bot.angle,
+
+      speed:
+        orange.speed ??
+        bot.speed,
+
+      boost:
+        orange.boost ??
+        bot.boost,
+
+      boosting:
+        !!orange.boosting,
+
+      demolished:
+        !!orange.demolished,
+
+      demoTimer:
+        orange.demoTimer ??
+        0
+    }
+  );
+
+
+  Object.assign(
+    ball,
+    {
+      x:
+        b.x ??
+        ball.x,
+
+      y:
+        b.y ??
+        ball.y,
+
+      vx:
+        b.vx ??
+        ball.vx,
+
+      vy:
+        b.vy ??
+        ball.vy
+    }
+  );
+
+
+  blueScore =
+    state.blueScore ??
+    blueScore;
+
+  orangeScore =
+    state.orangeScore ??
+    orangeScore;
+
+
+  gameTime =
+    state.gameTime ??
+    gameTime;
+
+
+  if (
+    onlinePlayerNumber === 2
+  ) {
+
+    playerPoints =
+      state.orangePoints ??
+      playerPoints;
+
+    opponentPoints =
+      state.bluePoints ??
+      opponentPoints;
+
+  } else {
+
+    playerPoints =
+      state.bluePoints ??
+      playerPoints;
+
+    opponentPoints =
+      state.orangePoints ??
+      opponentPoints;
+  }
+
+
+  updatePoints();
+
+
+  setText(
+    blueScoreEl,
+    blueScore
+  );
+
+  setText(
+    orangeScoreEl,
+    orangeScore
+  );
+
+
+  updateTimerDisplay();
+
+
+  if (
+    !gameRunning &&
+    state.gameRunning
+  ) {
+
+    gameRunning = true;
+
+    paused =
+      !!state.paused;
+
+    goalActive =
+      !!state.goalActive;
+
+
+    mainMenu?.classList.add(
+      "hidden"
+    );
+
+    resultScreen?.classList.add(
+      "hidden"
+    );
+  }
+}
+
+
+/* =========================================================
+   ARENA
+========================================================= */
 
 function drawArena() {
+
   ctx.fillStyle =
     "#06131f";
 
@@ -2271,50 +4257,52 @@ function drawArena() {
     H
   );
 
+
+  /*
+    Grille
+  */
+
   ctx.strokeStyle =
     "rgba(80,180,255,.08)";
 
   ctx.lineWidth = 1;
+
 
   for (
     let x = 0;
     x < W;
     x += 60
   ) {
+
     ctx.beginPath();
 
-    ctx.moveTo(
-      x,
-      0
-    );
+    ctx.moveTo(x, 0);
 
-    ctx.lineTo(
-      x,
-      H
-    );
+    ctx.lineTo(x, H);
 
     ctx.stroke();
   }
+
 
   for (
     let y = 0;
     y < H;
     y += 60
   ) {
+
     ctx.beginPath();
 
-    ctx.moveTo(
-      0,
-      y
-    );
+    ctx.moveTo(0, y);
 
-    ctx.lineTo(
-      W,
-      y
-    );
+    ctx.lineTo(W, y);
 
     ctx.stroke();
   }
+
+
+  /*
+    Terrain
+  */
 
   ctx.strokeStyle =
     "rgba(120,220,255,.35)";
@@ -2330,6 +4318,11 @@ function drawArena() {
       field.top
   );
 
+
+  /*
+    Ligne centrale
+  */
+
   ctx.beginPath();
 
   ctx.moveTo(
@@ -2344,6 +4337,11 @@ function drawArena() {
 
   ctx.stroke();
 
+
+  /*
+    Cercle central
+  */
+
   ctx.beginPath();
 
   ctx.arc(
@@ -2355,6 +4353,7 @@ function drawArena() {
   );
 
   ctx.stroke();
+
 
   ctx.fillStyle =
     "#72eaff";
@@ -2371,15 +4370,23 @@ function drawArena() {
 
   ctx.fill();
 
+
+  /*
+    Cages visibles.
+    Les zones de but restent invisibles.
+  */
+
   ctx.lineWidth = 5;
 
   ctx.shadowBlur = 18;
+
 
   ctx.strokeStyle =
     "#18cfff";
 
   ctx.shadowColor =
     "#00aaff";
+
 
   ctx.strokeRect(
     field.left -
@@ -2390,11 +4397,13 @@ function drawArena() {
       goal.top
   );
 
+
   ctx.strokeStyle =
     "#ff851b";
 
   ctx.shadowColor =
     "#ff5e00";
+
 
   ctx.strokeRect(
     field.right,
@@ -2404,45 +4413,59 @@ function drawArena() {
       goal.top
   );
 
+
   ctx.shadowBlur = 0;
+
 
   drawBoostPads();
 }
 
+
+/* =========================================================
+   PADS VISUELS
+========================================================= */
+
 function drawBoostPads() {
-  for (
-    const p of boostPads
-  ) {
+
+  for (const pad of boostPads) {
+
     const available =
-      p.cooldown <= 0;
+      pad.cooldown <= 0;
 
     const pulse =
       1 +
-      Math.sin(p.pulse) *
-        0.08;
+      Math.sin(
+        pad.pulse
+      ) * 0.08;
+
 
     ctx.save();
 
+
     ctx.translate(
-      p.x,
-      p.y
+      pad.x,
+      pad.y
     );
+
 
     ctx.globalAlpha =
       available
         ? 1
         : 0.35;
 
+
     ctx.shadowColor =
-      p.color;
+      pad.color;
 
     ctx.shadowBlur =
       available
         ? 22
         : 8;
 
+
     ctx.fillStyle =
       "rgba(8,18,30,.9)";
+
 
     ctx.beginPath();
 
@@ -2458,8 +4481,10 @@ function drawBoostPads() {
 
     ctx.fill();
 
+
     ctx.fillStyle =
-      p.color;
+      pad.color;
+
 
     ctx.beginPath();
 
@@ -2475,10 +4500,12 @@ function drawBoostPads() {
 
     ctx.fill();
 
+
     ctx.strokeStyle =
       "#fff";
 
     ctx.lineWidth = 2;
+
 
     ctx.beginPath();
 
@@ -2492,14 +4519,17 @@ function drawBoostPads() {
 
     ctx.stroke();
 
-    if (p.flash > 0) {
+
+    if (pad.flash > 0) {
+
       ctx.globalAlpha =
-        p.flash;
+        pad.flash;
 
       ctx.strokeStyle =
         "#fff";
 
       ctx.lineWidth = 4;
+
 
       ctx.beginPath();
 
@@ -2507,7 +4537,7 @@ function drawBoostPads() {
         0,
         0,
         32 +
-          (1 - p.flash) *
+          (1 - pad.flash) *
             18,
         0,
         Math.PI * 2
@@ -2516,18 +4546,25 @@ function drawBoostPads() {
       ctx.stroke();
     }
 
+
     ctx.restore();
   }
+
 
   drawParticles(
     boostParticles
   );
 }
 
+
+/* =========================================================
+   PARTICULES VISUELLES
+========================================================= */
+
 function drawParticles(list) {
-  for (
-    const p of list
-  ) {
+
+  for (const p of list) {
+
     ctx.save();
 
     ctx.globalAlpha =
@@ -2547,6 +4584,7 @@ function drawParticles(list) {
 
     ctx.shadowBlur = 12;
 
+
     ctx.beginPath();
 
     ctx.arc(
@@ -2563,12 +4601,20 @@ function drawParticles(list) {
   }
 }
 
+
 function drawGoalEffects() {
+
   drawParticles(
     goalParticles
   );
 
+  drawParticles(
+    demoParticles
+  );
+
+
   if (goalFlash > 0) {
+
     ctx.save();
 
     ctx.globalAlpha =
@@ -2586,16 +4632,46 @@ function drawGoalEffects() {
 
     ctx.restore();
   }
+
+
+  if (demoFlash > 0) {
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      demoFlash * 0.15;
+
+    ctx.fillStyle =
+      "#fff";
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.restore();
+  }
 }
 
+
+/* =========================================================
+   HUD
+========================================================= */
+
 function updateHUD() {
+
   const car =
     localCar();
 
+
   if (boostFill) {
+
     boostFill.style.width =
       `${car.boost}%`;
   }
+
 
   setText(
     boostNumber,
@@ -2604,31 +4680,64 @@ function updateHUD() {
     )
   );
 
-  const s =
-    Math.abs(car.speed);
+
+  const speed =
+    Math.abs(
+      car.speed
+    );
+
 
   const kmh =
     car.boosting
       ? Math.round(
           Math.min(
             83,
-            s *
+            speed *
               (83 / 11.7)
           )
         )
       : Math.round(
           Math.min(
             51,
-            s *
+            speed *
               (51 / 7.2)
           )
         );
+
 
   setText(
     speedNumber,
     kmh
   );
+
+
+  /*
+    Balle :
+    9 unités = 216 km/h
+  */
+
+  const ballKmh =
+    Math.round(
+      Math.min(
+        216,
+        Math.hypot(
+          ball.vx,
+          ball.vy
+        ) * 24
+      )
+    );
+
+
+  setText(
+    ballSpeedEl,
+    ballKmh
+  );
 }
+
+
+/* =========================================================
+   OUTIL ROUND RECT
+========================================================= */
 
 function roundRect(
   x,
@@ -2637,6 +4746,7 @@ function roundRect(
   h,
   r
 ) {
+
   ctx.beginPath();
 
   ctx.moveTo(
@@ -2695,11 +4805,41 @@ function roundRect(
   ctx.closePath();
 }
 
-/* =========================================
-   BOUCLE DU JEU
-========================================= */
+
+/* =========================================================
+   BOUTONS PRINCIPAUX
+========================================================= */
+
+$("playButton")?.addEventListener(
+  "click",
+  startOffline
+);
+
+
+playAgainButton?.addEventListener(
+  "click",
+  startMatch
+);
+
+
+mainMenuButton?.addEventListener(
+  "click",
+  showMainMenu
+);
+
+
+$("restartButton")?.addEventListener(
+  "click",
+  startMatch
+);
+
+
+/* =========================================================
+   GAME LOOP
+========================================================= */
 
 function gameLoop(now) {
+
   const dt =
     Math.min(
       now - lastTime,
@@ -2708,8 +4848,30 @@ function gameLoop(now) {
 
   lastTime = now;
 
+
   updateEffects(dt);
+
   updateBoostPads(dt);
+
+
+  /*
+    ONLINE CLIENT
+  */
+
+  if (
+    gameMode === "multiplayer" &&
+    !isOnlineHost
+  ) {
+    /*
+      Le client ne simule pas la physique.
+      Il reçoit l'état du serveur.
+    */
+  }
+
+
+  /*
+    MATCH
+  */
 
   if (
     gameRunning &&
@@ -2717,100 +4879,117 @@ function gameLoop(now) {
     !goalActive
   ) {
 
+
+    /*
+      OFFLINE
+    */
+
     if (
-      gameMode ===
-      "multiplayer"
+      gameMode === "offline"
     ) {
 
-      if (onlineHost) {
-        player.update();
+      player.update(dt);
 
-        bot.updateRemote(
-          remoteInput
-        );
+      bot.update(dt);
 
-        bot.x +=
-          Math.cos(bot.angle) *
-          bot.speed;
-
-        bot.y +=
-          Math.sin(bot.angle) *
-          bot.speed;
-
-        bot.speed *= 0.985;
-
-        if (
-          Math.abs(bot.speed) <
-          0.02
-        ) {
-          bot.speed = 0;
-        }
-
-        bot.keepInside();
-
-        bot.boost =
-          Math.min(
-            100,
-            bot.boost + 0.025
-          );
-
-        ball.update();
-
-        if (!goalActive) {
-          carBallCollision(
-            player
-          );
-
-          carBallCollision(
-            bot
-          );
-
-          carCarCollision(
-            player,
-            bot
-          );
-
-          updateTimer(dt);
-        }
-
-        if (
-          performance.now() -
-            lastNetworkSend >
-          45
-        ) {
-          sendNetworkState(
-            false
-          );
-        }
-
-      } else {
-        sendLocalInput();
-      }
-
-    } else {
-
-      player.update();
-      bot.update();
       ball.update();
 
-      if (!goalActive) {
-        carBallCollision(
-          player
-        );
+      carBallCollision(
+        player
+      );
 
-        carBallCollision(
-          bot
-        );
+      carBallCollision(
+        bot
+      );
 
-        carCarCollision(
-          player,
-          bot
-        );
+      carCarCollision(
+        player,
+        bot
+      );
 
-        updateTimer(dt);
+      updateTimer(dt);
+    }
+
+
+    /*
+      ONLINE HOST
+    */
+
+    else if (
+      gameMode === "multiplayer" &&
+      isOnlineHost
+    ) {
+
+      /*
+        Joueur 1 = bleu
+      */
+
+      player.update(dt);
+
+
+      /*
+        Joueur 2 = orange.
+        Le serveur utilise son input,
+        pas l'IA.
+      */
+
+      bot.updateFromNetworkInput(
+        opponentInput
+      );
+
+
+      ball.update();
+
+
+      carBallCollision(
+        player
+      );
+
+      carBallCollision(
+        bot
+      );
+
+      carCarCollision(
+        player,
+        bot
+      );
+
+
+      updateTimer(dt);
+
+
+      networkStateTimer += dt;
+
+
+      /*
+        Synchronisation fréquente
+      */
+
+      if (
+        networkStateTimer >= 50
+      ) {
+
+        networkStateTimer = 0;
+
+        sendNetworkState();
       }
     }
+
+
+    /*
+      ONLINE CLIENT
+    */
+
+    else {
+
+      sendInput();
+    }
   }
+
+
+  /*
+    Dessin
+  */
 
   drawArena();
 
@@ -2824,706 +5003,26 @@ function gameLoop(now) {
 
   updateHUD();
 
+
   requestAnimationFrame(
     gameLoop
   );
 }
 
-/* =========================================
-   RECHERCHE AUTOMATIQUE 1V1
-========================================= */
 
-function makeSearchOverlay() {
-  if (searchOverlay)
-    return;
-
-  searchOverlay =
-    document.createElement(
-      "div"
-    );
-
-  searchOverlay.id =
-    "onlineSearchOverlay";
-
-  searchOverlay.innerHTML = `
-    <div style="
-      font-size:42px;
-      font-weight:900;
-      letter-spacing:3px;
-    ">
-      1V1 EN LIGNE
-    </div>
-
-    <div id="onlineSearchText"
-      style="
-        margin-top:18px;
-        font-size:22px;
-      ">
-      RECHERCHE D'UN JOUEUR…
-    </div>
-
-    <button id="cancelOnlineSearch"
-      style="
-        margin-top:28px;
-        padding:13px 24px;
-        border:0;
-        border-radius:10px;
-        font-weight:800;
-        cursor:pointer;
-      ">
-      ANNULER
-    </button>
-  `;
-
-  Object.assign(
-    searchOverlay.style,
-    {
-      position: "fixed",
-      inset: "0",
-      zIndex: "12000",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      background:
-        "rgba(3,8,16,.96)",
-      color: "white",
-      fontFamily:
-        "Arial,sans-serif",
-      textAlign: "center"
-    }
-  );
-
-  document.body.appendChild(
-    searchOverlay
-  );
-
-  $("cancelOnlineSearch").onclick =
-    cancelOnlineSearch;
-}
-
-function setSearchText(text) {
-  makeSearchOverlay();
-
-  const el =
-    $("onlineSearchText");
-
-  if (el) {
-    el.textContent = text;
-  }
-}
-
-function connectOnline() {
-  if (
-    socket &&
-    (
-      socket.readyState ===
-        WebSocket.OPEN ||
-      socket.readyState ===
-        WebSocket.CONNECTING
-    )
-  ) {
-    return;
-  }
-
-  try {
-    socket =
-      new WebSocket(
-        ONLINE_SERVER_URL
-      );
-
-  } catch (e) {
-    setSearchText(
-      "CONNEXION AU SERVEUR…"
-    );
-
-    scheduleReconnect();
-
-    return;
-  }
-
-  socket.onopen = () => {
-    onlineSearching = true;
-
-    setSearchText(
-      "RECHERCHE D'UN JOUEUR…"
-    );
-
-    socket.send(
-      JSON.stringify({
-        type: "find-match",
-        mode: "1v1"
-      })
-    );
-  };
-
-  socket.onmessage = e => {
-    let data;
-
-    try {
-      data =
-        JSON.parse(
-          e.data
-        );
-    } catch {
-      return;
-    }
-
-    if (
-      data.type ===
-      "searching"
-    ) {
-      onlineSearching = true;
-
-      setSearchText(
-        "RECHERCHE D'UN JOUEUR…"
-      );
-    }
-
-    if (
-      data.type ===
-      "match-found"
-    ) {
-      onlineSearching = false;
-
-      onlineHost =
-        !!data.isHost;
-
-      onlinePlayerNumber =
-        data.playerNumber;
-
-      onlineMatchId =
-        data.matchId;
-
-      if (searchOverlay) {
-        searchOverlay.remove();
-        searchOverlay = null;
-      }
-
-      startMatch(
-        "multiplayer"
-      );
-    }
-
-    if (
-      data.type ===
-      "opponent-input"
-    ) {
-      remoteInput = {
-        ...remoteInput,
-        ...(data.input || {})
-      };
-    }
-
-    if (
-      data.type ===
-      "game-state"
-    ) {
-      applyNetworkState(
-        data.state
-      );
-    }
-
-    if (
-      data.type ===
-      "opponent-left"
-    ) {
-      alert(
-        "L'adversaire a quitté la partie."
-      );
-
-      stopOnline();
-
-      showMainMenu();
-    }
-
-    if (
-      data.type ===
-      "pong"
-    ) {
-      lastHeartbeat =
-        performance.now();
-    }
-  };
-
-  socket.onclose = () => {
-    if (onlineSearching) {
-      setSearchText(
-        "RECONNEXION AU SERVEUR…"
-      );
-
-      scheduleReconnect();
-    }
-  };
-
-  socket.onerror = () => {};
-}
-
-function scheduleReconnect() {
-  if (
-    reconnectTimer ||
-    !onlineSearching
-  ) {
-    return;
-  }
-
-  reconnectTimer =
-    setTimeout(
-      () => {
-        reconnectTimer = null;
-        connectOnline();
-      },
-      3000
-    );
-}
-
-function startOnlineSearch() {
-  gameMode =
-    "multiplayer";
-
-  onlineSearching = true;
-
-  onlineHost = false;
-  onlinePlayerNumber = 0;
-  onlineMatchId = null;
-
-  makeSearchOverlay();
-
-  setSearchText(
-    "RECHERCHE D'UN JOUEUR…"
-  );
-
-  connectOnline();
-}
-
-function cancelOnlineSearch() {
-  onlineSearching = false;
-
-  if (reconnectTimer) {
-    clearTimeout(
-      reconnectTimer
-    );
-
-    reconnectTimer = null;
-  }
-
-  if (
-    socket &&
-    socket.readyState ===
-      WebSocket.OPEN
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: "cancel-search"
-      })
-    );
-  }
-
-  if (socket) {
-    try {
-      socket.close();
-    } catch {}
-  }
-
-  socket = null;
-
-  if (searchOverlay) {
-    searchOverlay.remove();
-    searchOverlay = null;
-  }
-
-  gameMode = "offline";
-
-  showMainMenu();
-}
-
-function stopOnline() {
-  onlineSearching = false;
-
-  if (reconnectTimer) {
-    clearTimeout(
-      reconnectTimer
-    );
-
-    reconnectTimer = null;
-  }
-
-  if (
-    socket &&
-    socket.readyState ===
-      WebSocket.OPEN &&
-    onlineMatchId
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: "leave-match"
-      })
-    );
-  }
-
-  if (socket) {
-    try {
-      socket.close();
-    } catch {}
-  }
-
-  socket = null;
-
-  onlineMatchId = null;
-  onlineHost = false;
-  onlinePlayerNumber = 0;
-
-  if (searchOverlay) {
-    searchOverlay.remove();
-    searchOverlay = null;
-  }
-}
-
-function sendLocalInput() {
-  if (
-    !socket ||
-    socket.readyState !==
-      WebSocket.OPEN ||
-    !onlineMatchId
-  ) {
-    return;
-  }
-
-  const input = {
-    forward:
-      controlPressed(
-        "forward"
-      ),
-
-    reverse:
-      controlPressed(
-        "reverse"
-      ),
-
-    left:
-      controlPressed(
-        "left"
-      ),
-
-    right:
-      controlPressed(
-        "right"
-      ),
-
-    boost:
-      controlPressed(
-        "boost"
-      )
-  };
-
-  const now =
-    performance.now();
-
-  if (
-    now -
-      lastNetworkSend >
-    45
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: "input",
-        input
-      })
-    );
-
-    lastNetworkSend = now;
-  }
-}
-
-function sendNetworkState(
-  force
-) {
-  if (
-    !onlineHost ||
-    !socket ||
-    socket.readyState !==
-      WebSocket.OPEN ||
-    !onlineMatchId
-  ) {
-    return;
-  }
-
-  const now =
-    performance.now();
-
-  if (
-    !force &&
-    now -
-      lastNetworkSend <
-      45
-  ) {
-    return;
-  }
-
-  const state = {
-    player: {
-      x: player.x,
-      y: player.y,
-      angle: player.angle,
-      speed: player.speed,
-      boost: player.boost,
-      boosting:
-        player.boosting
-    },
-
-    bot: {
-      x: bot.x,
-      y: bot.y,
-      angle: bot.angle,
-      speed: bot.speed,
-      boost: bot.boost,
-      boosting:
-        bot.boosting
-    },
-
-    ball: {
-      x: ball.x,
-      y: ball.y,
-      vx: ball.vx,
-      vy: ball.vy
-    },
-
-    blueScore,
-    orangeScore,
-    gameTime,
-    goalActive,
-
-    bluePoints:
-      Math.max(
-        0,
-        playerPoints
-      ),
-
-    orangePoints: 0
-  };
-
-  socket.send(
-    JSON.stringify({
-      type: "game-state",
-      state
-    })
-  );
-
-  lastNetworkSend = now;
-
-  lastHeartbeat =
-    now;
-}
-
-function applyNetworkState(
-  state
-) {
-  if (
-    !state ||
-    onlineHost
-  ) {
-    return;
-  }
-
-  Object.assign(
-    player,
-    state.player || {}
-  );
-
-  Object.assign(
-    bot,
-    state.bot || {}
-  );
-
-  Object.assign(
-    ball,
-    state.ball || {}
-  );
-
-  blueScore =
-    state.blueScore || 0;
-
-  orangeScore =
-    state.orangeScore || 0;
-
-  gameTime =
-    typeof state.gameTime ===
-    "number"
-      ? state.gameTime
-      : gameTime;
-
-  const wasGoal =
-    lastNetGoalActive;
-
-  goalActive =
-    !!state.goalActive;
-
-  if (
-    goalActive &&
-    !wasGoal
-  ) {
-    goalMessage?.classList.remove(
-      "hidden"
-    );
-
-    setText(
-      goalText,
-      "GOAL!"
-    );
-  }
-
-  if (
-    !goalActive &&
-    wasGoal
-  ) {
-    goalMessage?.classList.add(
-      "hidden"
-    );
-  }
-
-  lastNetGoalActive =
-    goalActive;
-
-  setText(
-    blueScoreEl,
-    blueScore
-  );
-
-  setText(
-    orangeScoreEl,
-    orangeScore
-  );
-
-  updateTimerDisplay();
-
-  playerPoints =
-    onlinePlayerNumber === 1
-      ? (
-          state.bluePoints ||
-          0
-        )
-      : (
-          state.orangePoints ||
-          0
-        );
-
-  updatePoints();
-}
-
-/* =========================================
-   MENU 1V1 / HORS LIGNE
-========================================= */
-
-function setupOnlineMenu() {
-  const onlineButton =
-    $("playButton");
-
-  if (!onlineButton) {
-    return;
-  }
-
-  // PLAY GAME devient 1V1 EN LIGNE
-  onlineButton.type =
-    "button";
-
-  onlineButton.disabled =
-    false;
-
-  onlineButton.textContent =
-    "1V1 EN LIGNE";
-
-  onlineButton.onclick =
-    () =>
-      startOnlineSearch();
-
-  // JEU HORS LIGNE sous le bouton 1V1
-  let offline =
-    $("offlinePlayButton");
-
-  if (!offline) {
-    offline =
-      document.createElement(
-        "button"
-      );
-
-    offline.id =
-      "offlinePlayButton";
-
-    offline.className =
-      onlineButton.className;
-
-    offline.type =
-      "button";
-
-    offline.style.marginTop =
-      "10px";
-
-    onlineButton.parentNode?.insertBefore(
-      offline,
-      onlineButton.nextSibling
-    );
-  }
-
-  offline.disabled =
-    false;
-
-  offline.textContent =
-    "JEU HORS LIGNE";
-
-  offline.onclick = () => {
-    if (onlineSearching) {
-      cancelOnlineSearch();
-    }
-
-    startMatch(
-      "offline"
-    );
-  };
-}
-
-/* =========================================
-   HEARTBEAT SERVEUR
-========================================= */
-
-setInterval(
-  () => {
-    if (
-      socket &&
-      socket.readyState ===
-        WebSocket.OPEN
-    ) {
-      socket.send(
-        JSON.stringify({
-          type: "ping"
-        })
-      );
-    }
-  },
-  10000
-);
-
-/* =========================================
+/* =========================================================
    INITIALISATION
-========================================= */
+========================================================= */
+
+ensureMobileSystem();
 
 setupOnlineMenu();
 
-playAgainButton?.addEventListener(
-  "click",
-  startMatch
-);
-
-mainMenuButton?.addEventListener(
-  "click",
-  showMainMenu
-);
-
-$("restartButton")?.addEventListener(
-  "click",
-  startMatch
-);
-
 updateControlUI();
+
+updateMobileSettings();
+
+updateBoostSide();
 
 resetPoints();
 
@@ -3538,6 +5037,48 @@ player.draw();
 bot.draw();
 
 updateHUD();
+
+
+/*
+  Le choix PC / MOBILE
+  revient à chaque lancement.
+*/
+
+showDeviceChooser();
+
+
+/*
+  Heartbeat serveur
+*/
+
+setInterval(
+  () => {
+
+    if (
+      socket &&
+      socket.readyState ===
+        WebSocket.OPEN
+    ) {
+
+      try {
+
+        socket.send(
+          JSON.stringify({
+            type: "ping"
+          })
+        );
+
+      } catch {}
+    }
+
+  },
+  10000
+);
+
+
+/*
+  Lancement
+*/
 
 requestAnimationFrame(
   gameLoop
