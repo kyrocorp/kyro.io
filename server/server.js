@@ -3,224 +3,241 @@ const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 10000;
 
-const server = http.createServer((req, res) => {
+const httpServer = http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain; charset=utf-8"
   });
 
-  res.end("Rocket League.io Multiplayer Server OK");
+  res.end("Rocket League.io server online");
 });
 
 const wss = new WebSocket.Server({
-  server
+  server: httpServer
 });
 
-const rooms = new Map();
+const waitingPlayers = [];
+const matches = new Map();
 
-function send(ws, data) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
+let nextPlayerId = 1;
+let nextMatchId = 1;
+
+function send(player, data) {
+  if (!player || !player.ws) return;
+
+  if (player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(JSON.stringify(data));
   }
 }
 
-function broadcast(room, data, except = null) {
-  for (const player of room.players) {
-    if (player !== except) {
-      send(player.ws, data);
-    }
-  }
-}
+function removeFromQueue(player) {
+  const index = waitingPlayers.indexOf(player);
 
-function createRoomCode() {
-  let code;
-
-  do {
-    code = Math.random()
-      .toString(36)
-      .substring(2, 6)
-      .toUpperCase();
-  } while (rooms.has(code));
-
-  return code;
-}
-
-function removePlayer(player) {
-  const room = player.room;
-
-  if (!room) return;
-
-  room.players = room.players.filter(p => p !== player);
-
-  if (room.players.length === 0) {
-    rooms.delete(room.code);
-    return;
+  if (index !== -1) {
+    waitingPlayers.splice(index, 1);
   }
 
-  broadcast(room, {
-    type: "player-left"
+  player.searching = false;
+}
+
+function makeMatch(player1, player2) {
+  const matchId = "match-" + nextMatchId++;
+
+  const match = {
+    id: matchId,
+    player1,
+    player2
+  };
+
+  matches.set(matchId, match);
+
+  player1.match = match;
+  player2.match = match;
+
+  player1.searching = false;
+  player2.searching = false;
+
+  send(player1, {
+    type: "match-found",
+    matchId,
+    playerNumber: 1,
+    team: "blue",
+    isHost: true
   });
 
-  player.room = null;
+  send(player2, {
+    type: "match-found",
+    matchId,
+    playerNumber: 2,
+    team: "orange",
+    isHost: false
+  });
+
+  console.log(
+    `Match ${matchId}: ${player1.id} vs ${player2.id}`
+  );
+}
+
+function findOpponent(player) {
+  for (let i = 0; i < waitingPlayers.length; i++) {
+    const opponent = waitingPlayers[i];
+
+    if (
+      opponent !== player &&
+      opponent.searching &&
+      !opponent.match
+    ) {
+      waitingPlayers.splice(i, 1);
+      makeMatch(opponent, player);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function disconnectMatch(player) {
+  const match = player.match;
+
+  if (!match) return;
+
+  const opponent =
+    match.player1 === player
+      ? match.player2
+      : match.player1;
+
+  matches.delete(match.id);
+
+  player.match = null;
+
+  if (opponent) {
+    opponent.match = null;
+
+    send(opponent, {
+      type: "opponent-left"
+    });
+  }
 }
 
 wss.on("connection", ws => {
   const player = {
+    id: "player-" + nextPlayerId++,
     ws,
-    room: null,
-    id: Math.random().toString(36).substring(2, 10)
+    searching: false,
+    match: null
   };
 
-  send(ws, {
+  console.log("Player connected:", player.id);
+
+  send(player, {
     type: "connected",
     playerId: player.id
   });
 
   ws.on("message", raw => {
-    let message;
+    let data;
 
     try {
-      message = JSON.parse(raw.toString());
+      data = JSON.parse(raw.toString());
     } catch {
       return;
     }
 
-    /*
-      CREATE ROOM
-    */
-    if (message.type === "create-room") {
-      if (player.room) return;
-
-      const code = createRoomCode();
-
-      const room = {
-        code,
-        players: []
-      };
-
-      rooms.set(code, room);
-
-      player.room = room;
-      room.players.push(player);
-
-      send(ws, {
-        type: "room-created",
-        roomCode: code,
-        playerNumber: 1
+    if (data.type === "ping") {
+      send(player, {
+        type: "pong"
       });
 
       return;
     }
 
-    /*
-      JOIN ROOM
-    */
-    if (message.type === "join-room") {
-      if (player.room) return;
+    if (data.type === "find-match") {
+      if (player.match) return;
 
-      const code = String(message.roomCode || "")
-        .trim()
-        .toUpperCase();
+      removeFromQueue(player);
 
-      const room = rooms.get(code);
+      player.searching = true;
 
-      if (!room) {
-        send(ws, {
-          type: "error",
-          message: "Partie introuvable."
+      const found = findOpponent(player);
+
+      if (!found) {
+        waitingPlayers.push(player);
+
+        send(player, {
+          type: "searching"
         });
-        return;
+
+        console.log(
+          `${player.id} is searching for a 1v1`
+        );
       }
 
-      if (room.players.length >= 2) {
-        send(ws, {
-          type: "error",
-          message: "Cette partie est déjà pleine."
-        });
-        return;
-      }
+      return;
+    }
 
-      player.room = room;
-      room.players.push(player);
+    if (data.type === "cancel-search") {
+      removeFromQueue(player);
 
-      send(ws, {
-        type: "room-joined",
-        roomCode: code,
-        playerNumber: 2
-      });
-
-      broadcast(room, {
-        type: "match-ready"
+      send(player, {
+        type: "search-cancelled"
       });
 
       return;
     }
 
-    /*
-      GAME STATE
-    */
-    if (message.type === "game-state") {
-      if (!player.room) return;
+    if (data.type === "input") {
+      if (!player.match) return;
 
-      broadcast(
-        player.room,
-        {
-          type: "game-state",
-          playerId: player.id,
-          state: message.state
-        },
-        player
-      );
+      const opponent =
+        player.match.player1 === player
+          ? player.match.player2
+          : player.match.player1;
+
+      send(opponent, {
+        type: "opponent-input",
+        input: data.input
+      });
 
       return;
     }
 
-    /*
-      GAME EVENT
-      But, démolition, boost, etc.
-    */
-    if (message.type === "game-event") {
-      if (!player.room) return;
+    if (data.type === "game-state") {
+      if (!player.match) return;
 
-      broadcast(
-        player.room,
-        {
-          type: "game-event",
-          playerId: player.id,
-          event: message.event
-        },
-        player
-      );
+      // Only the host is allowed to send authoritative game state.
+      if (player.match.player1 !== player) return;
+
+      const opponent = player.match.player2;
+
+      send(opponent, {
+        type: "game-state",
+        state: data.state
+      });
 
       return;
     }
 
-    /*
-      CHAT / AUTRES MESSAGES
-    */
-    if (message.type === "custom") {
-      if (!player.room) return;
+    if (data.type === "leave-match") {
+      disconnectMatch(player);
 
-      broadcast(
-        player.room,
-        {
-          type: "custom",
-          playerId: player.id,
-          data: message.data
-        },
-        player
-      );
+      return;
     }
   });
 
   ws.on("close", () => {
-    removePlayer(player);
+    console.log("Player disconnected:", player.id);
+
+    removeFromQueue(player);
+    disconnectMatch(player);
   });
 
   ws.on("error", () => {
-    removePlayer(player);
+    removeFromQueue(player);
+    disconnectMatch(player);
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Rocket League.io server running on port ${PORT}`);
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(
+    `Rocket League.io server listening on port ${PORT}`
+  );
 });
