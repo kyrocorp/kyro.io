@@ -1548,6 +1548,17 @@ function startCountdown() {
     return;
   }
 
+  /*
+    IMPORTANT :
+    On affiche le jeu ici.
+    Le canvas contient la map 2D.
+    La map est donc visible pendant
+    le compte à rebours et au début
+    de la partie.
+  */
+
+  show(gameWrapper);
+
   hide(matchIntro);
 
   gameState.countdown =
@@ -2840,7 +2851,7 @@ function updateTimer(
 
   if (
     gameState.mode ===
-      "online"
+    "online"
   ) {
     sendGameState();
   }
@@ -2972,6 +2983,7 @@ function returnToMainMenu() {
 
   closeWebSocket(true);
 
+  hide(gameWrapper);
   hide(endScreen);
   hide(pauseMenu);
   hide(matchIntro);
@@ -2998,6 +3010,8 @@ function restartMatch() {
   hide(endScreen);
 
   resetMatch();
+
+  show(gameWrapper);
 
   showMatchIntro();
 
