@@ -1,2573 +1,953 @@
-const canvas = document.getElementById("gameCanvas");
-const gameWrapper = document.getElementById("gameWrapper");
-if (!canvas) throw new Error("gameCanvas introuvable");
+(function () {
+  'use strict';
 
-const ctx = canvas.getContext("2d");
-const W = canvas.width;
-const H = canvas.height;
+  /* =====================================================
+     CONFIG (valeurs par défaut, à ajuster selon tes specs)
+  ===================================================== */
 
-const $ = id => document.getElementById(id);
+  const SERVER_URL = 'wss://kyro-io.onrender.com';
 
-const blueScoreEl = $("blueScore");
-const orangeScoreEl = $("orangeScore");
-const timerEl = $("timer");
-const goalMessage = $("goalMessage");
-const goalText = $("goalText");
-const goalScorer = $("goalScorer");
-const countdownEl = $("countdown");
-const pauseMenu = $("pauseMenu");
-const resultScreen = $("resultScreen");
-const winnerDisplay = $("winnerDisplay");
-const finalBlueScore = $("finalBlueScore");
-const finalOrangeScore = $("finalOrangeScore");
-const playAgainButton = $("playAgainButton");
-const mainMenuButton = $("mainMenuButton");
-const mainMenu = $("mainMenu");
-const howToPlayMenu = $("howToPlayMenu");
-const matchIntro = $("matchIntro");
-const pointsPanel = $("pointsPanel");
-const playerPointsEl = $("playerPoints");
-const pointsNotification = $("pointsNotification");
-const boostFill = $("boostFill");
-const boostNumber = $("boostNumber");
-const speedNumber = $("speedNumber");
+  const FIELD = {
+    w: 1200,
+    h: 700,
+    goalHeight: 220,
+    goalDepth: 22
+  };
 
-const settingsMenu = $("settingsMenu");
-const concedeConfirm = $("concedeConfirm");
+  const CAR_CFG = {
+    width: 46,
+    height: 26,
+    accel: 0.35,
+    reverseAccel: 0.22,
+    maxSpeed: 7.5,
+    maxSpeedBoost: 12,
+    turnSpeed: 0.045,
+    friction: 0.985,
+    boostDrain: 35,   // par seconde
+    boostRegen: 12    // par seconde
+  };
 
-const defaults = {
-  forward: "z",
-  reverse: "s",
-  left: "q",
-  right: "d",
-  boost: "space"
-};
+  const BALL_CFG = {
+    radius: 16,
+    friction: 0.992,
+    wallBounce: 0.75,
+    maxSpeed: 16
+  };
 
-let controls = {...defaults};
+  const MATCH_DURATION = 120; // secondes
 
-try {
-  const saved = JSON.parse(
-    localStorage.getItem("turboball-controls") || "null"
-  );
+  /* =====================================================
+     ETAT GLOBAL
+  ===================================================== */
 
-  if (
-    saved &&
-    Object.keys(defaults).every(
-      k => typeof saved[k] === "string"
-    )
-  ) {
-    controls = {...defaults, ...saved};
-  }
-} catch {}
+  let deviceType = null; // 'pc' | 'mobile'
+  let mode = null;       // 'online' | 'offline'
+  let ws = null;
+  let myPlayerNumber = null;
+  let isHost = false;
+  let matchId = null;
 
-const keyButtons = {
-  forward: $("forwardKeyButton"),
-  reverse: $("reverseKeyButton"),
-  left: $("leftKeyButton"),
-  right: $("rightKeyButton"),
-  boost: $("boostKeyButton")
-};
+  const controls = {
+    forward: 'z',
+    backward: 's',
+    left: 'q',
+    right: 'd',
+    boost: ' '
+  };
 
-const howButtons = {
-  forward: $("howZKey"),
-  reverse: $("howSKey"),
-  left: $("howQKey"),
-  right: $("howDKey"),
-  boost: $("howSpaceKey")
-};
+  const keysDown = {};
+  const touchInput = { forward: false, backward: false, left: false, right: false, boost: false };
 
-let waitingForAction = null;
-let settingsReturn = "main";
-const keys = Object.create(null);
+  let rebindingAction = null;
 
-function keyName(key) {
-  if (key === " ") return "SPACE";
-  if (key === "space") return "SPACE";
-  if (key.length === 1) return key.toUpperCase();
-  return key.toUpperCase();
-}
+  let canvas, ctx;
+  let running = false;
+  let paused = false;
+  let animFrameId = null;
+  let lastTimestamp = 0;
+  let matchTimeLeft = MATCH_DURATION;
+  let timerInterval = null;
 
-function saveControls() {
-  localStorage.setItem(
-    "turboball-controls",
-    JSON.stringify(controls)
-  );
-}
+  let world = null; // { cars: [car1, car2], ball, scoreBlue, scoreOrange }
 
-function updateControlUI() {
-  for (const action of Object.keys(keyButtons)) {
-    if (keyButtons[action]) {
-      keyButtons[action].textContent =
-        keyName(controls[action]);
-    }
+  /* =====================================================
+     UTILITAIRES
+  ===================================================== */
 
-    if (howButtons[action]) {
-      howButtons[action].textContent =
-        keyName(controls[action]);
-    }
-  }
-}
+  function $(id) { return document.getElementById(id); }
 
-function normalizedKey(e) {
-  if (e.code === "Space") return "space";
-  return e.key.toLowerCase();
-}
-
-function controlPressed(action) {
-  return !!keys[controls[action]];
-}
-
-function clearKeys() {
-  for (const k in keys) {
-    keys[k] = false;
-  }
-}
-
-document.addEventListener("keydown", e => {
-  if (waitingForAction) {
-    e.preventDefault();
-
-    if (e.key === "Escape") {
-      waitingForAction.textContent =
-        keyName(
-          controls[
-            waitingForAction.dataset.action
-          ]
-        );
-
-      waitingForAction = null;
-      return;
-    }
-
-    const action =
-      waitingForAction.dataset.action;
-
-    const newKey = normalizedKey(e);
-
-    if (
-      ["p", "escape"].includes(newKey) ||
-      newKey === ""
-    ) {
-      return;
-    }
-
-    const other = Object.keys(controls).find(
-      a =>
-        a !== action &&
-        controls[a] === newKey
-    );
-
-    if (other) return;
-
-    controls[action] = newKey;
-
-    saveControls();
-    updateControlUI();
-
-    waitingForAction = null;
-    return;
+  function loadControls() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('turboball_controls'));
+      if (saved) Object.assign(controls, saved);
+    } catch (e) {}
   }
 
-  const k = normalizedKey(e);
-
-  if (k === "space") {
-    e.preventDefault();
+  function saveControls() {
+    try { localStorage.setItem('turboball_controls', JSON.stringify(controls)); } catch (e) {}
   }
 
-  if (
-    gameRunning &&
-    !goalActive &&
-    k === "p"
-  ) {
-    togglePause();
-    return;
-  }
-
-  keys[k] = true;
-});
-
-document.addEventListener("keyup", e => {
-  keys[normalizedKey(e)] = false;
-});
-
-window.addEventListener("blur", clearKeys);
-
-for (const action of Object.keys(keyButtons)) {
-  keyButtons[action]?.addEventListener(
-    "click",
-    () => {
-      if (waitingForAction) return;
-
-      waitingForAction = keyButtons[action];
-
-      waitingForAction.textContent =
-        "PRESS A KEY";
-    }
-  );
-}
-
-$("resetControlsButton")?.addEventListener(
-  "click",
-  () => {
-    controls = {...defaults};
-
-    saveControls();
-    updateControlUI();
-  }
-);
-
-$("settingsButton")?.addEventListener(
-  "click",
-  () => openSettings("main")
-);
-
-function openSettings(from) {
-  settingsReturn = from;
-
-  mainMenu?.classList.add("hidden");
-  howToPlayMenu?.classList.add("hidden");
-  pauseMenu?.classList.add("hidden");
-
-  settingsMenu?.classList.remove("hidden");
-
-  updateControlUI();
-}
-
-$("settingsBackButton")?.addEventListener(
-  "click",
-  () => {
-    settingsMenu?.classList.add("hidden");
-
-    if (
-      settingsReturn === "pause" &&
-      gameRunning
-    ) {
-      paused = true;
-      pauseMenu?.classList.remove("hidden");
-    } else {
-      mainMenu?.classList.remove("hidden");
-    }
-  }
-);
-
-$("howToPlayButton")?.addEventListener(
-  "click",
-  () => {
-    mainMenu?.classList.add("hidden");
-    howToPlayMenu?.classList.remove("hidden");
-
-    updateControlUI();
-  }
-);
-
-$("backButton")?.addEventListener(
-  "click",
-  () => {
-    howToPlayMenu?.classList.add("hidden");
-    mainMenu?.classList.remove("hidden");
-  }
-);
-
-let blueScore = 0;
-let orangeScore = 0;
-let playerPoints = 0;
-let gameTime = 120;
-let gameRunning = false;
-let paused = false;
-let goalActive = false;
-
-let goalTimer = null;
-let countdownTimer = null;
-let countdownFinish = null;
-let introTimer = null;
-
-let lastTime = performance.now();
-
-let pointsTimer = null;
-let saveCooldown = 0;
-let saveDangerHandled = false;
-
-function setText(el, value) {
-  if (el) el.textContent = value;
-}
-
-function updatePoints() {
-  setText(
-    playerPointsEl,
-    playerPoints
-  );
-}
-
-function awardPoints(amount, reason) {
-  playerPoints += amount;
-
-  updatePoints();
-
-  if (pointsNotification) {
-    clearTimeout(pointsTimer);
-
-    pointsNotification.textContent =
-      `+${amount} ${reason}`;
-
-    pointsNotification.classList.remove(
-      "show"
-    );
-
-    void pointsNotification.offsetWidth;
-
-    pointsNotification.classList.add(
-      "show"
-    );
-
-    pointsTimer = setTimeout(() => {
-      pointsNotification.classList.remove(
-        "show"
-      );
-    }, 1100);
-  }
-
-  pointsPanel?.classList.remove(
-    "earned"
-  );
-
-  if (pointsPanel) {
-    void pointsPanel.offsetWidth;
-    pointsPanel.classList.add("earned");
-  }
-}
-
-function resetPoints() {
-  playerPoints = 0;
-  saveCooldown = 0;
-  saveDangerHandled = false;
-
-  updatePoints();
-
-  pointsNotification?.classList.remove(
-    "show"
-  );
-}
-
-const field = {
-  left: 90,
-  right: W - 90,
-  top: 45,
-  bottom: H - 45
-};
-
-const goal = {
-  top: 230,
-  bottom: 470,
-  depth: 70
-};
-
-const saveZone = {
-  x: field.left + 10,
-  y: goal.top + 12,
-  width: 145,
-  height:
-    goal.bottom -
-    goal.top -
-    24
-};
-
-const boostPads = [
-  {
-    x: field.left + 85,
-    y: field.top + 85,
-    color: "#20cfff",
-    cooldown: 0,
-    pulse: 0,
-    flash: 0
-  },
-  {
-    x: field.right - 85,
-    y: field.top + 85,
-    color: "#ff8a18",
-    cooldown: 0,
-    pulse: 1,
-    flash: 0
-  },
-  {
-    x: field.left + 85,
-    y: field.bottom - 85,
-    color: "#20cfff",
-    cooldown: 0,
-    pulse: 2,
-    flash: 0
-  },
-  {
-    x: field.right - 85,
-    y: field.bottom - 85,
-    color: "#ff8a18",
-    cooldown: 0,
-    pulse: 3,
-    flash: 0
-  },
-  {
-    x: W / 2,
-    y: field.top + 55,
-    color: "#65e8ff",
-    cooldown: 0,
-    pulse: 4,
-    flash: 0
-  },
-  {
-    x: W / 2,
-    y: field.bottom - 55,
-    color: "#baff35",
-    cooldown: 0,
-    pulse: 5,
-    flash: 0
-  }
-];
-
-const boostParticles = [];
-const goalParticles = [];
-
-let goalFlash = 0;
-
-class Car {
-  constructor(x, y, color, bot = false) {
-    this.startX = x;
-    this.startY = y;
-    this.color = color;
-    this.isBot = bot;
-
-    this.radius = 25;
-
-    this.x = x;
-    this.y = y;
-
-    this.angle = bot
-      ? Math.PI
-      : 0;
-
-    this.speed = 0;
-
-    this.maxSpeed = 7.2;
-    this.boostMax = 11.7;
-
-    this.boost = 100;
-    this.boosting = false;
-
-    this.ballContact = false;
-
-    this.aiTarget = null;
-    this.aiThink = 0;
-  }
-
-  reset() {
-    this.x = this.startX;
-    this.y = this.startY;
-
-    this.angle = this.isBot
-      ? Math.PI
-      : 0;
-
-    this.speed = 0;
-    this.boost = 100;
-
-    this.boosting = false;
-    this.ballContact = false;
-
-    this.aiTarget = null;
-  }
-
-  update() {
-    if (this.isBot) {
-      this.updateAI();
-    } else {
-      this.updatePlayer();
-    }
-
-    this.x +=
-      Math.cos(this.angle) *
-      this.speed;
-
-    this.y +=
-      Math.sin(this.angle) *
-      this.speed;
-
-    this.speed *= 0.985;
-
-    if (Math.abs(this.speed) < 0.02) {
-      this.speed = 0;
-    }
-
-    this.keepInside();
-
-    this.boost = Math.min(
-      100,
-      this.boost + 0.025
-    );
-  }
-
-  updatePlayer() {
-    this.boosting = false;
-
-    if (controlPressed("forward")) {
-      this.speed += 0.18;
-    }
-
-    if (controlPressed("reverse")) {
-      if (this.speed > 0) {
-        this.speed -= 0.25;
-      } else {
-        this.speed -= 0.12;
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  /* =====================================================
+     STYLES INJECTES (pour les nouveaux éléments de menu)
+  ===================================================== */
+
+  function injectDynamicStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+      #deviceMenu .menu-buttons { margin-top: 30px; }
+
+      #mainMenuColumns {
+        display: flex;
+        gap: 60px;
+        justify-content: center;
+        margin-top: 20px;
       }
-    }
+      #mainMenuColumns .menu-column-left,
+      #mainMenuColumns .menu-column-right {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
 
-    const turn =
-      0.055 *
-      Math.min(
-        Math.abs(this.speed) / 2 + 0.3,
-        1
-      );
+      #shopMenu .shop-empty {
+        color: #7d8ca0;
+        font-size: 13px;
+        letter-spacing: 2px;
+        padding: 40px 0;
+      }
 
-    if (controlPressed("left")) {
-      this.angle -=
-        turn *
-        (this.speed >= 0 ? 1 : -1);
-    }
+      #searchingOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        justify-content: center;
+        align-items: center;
+        background: rgba(1,5,12,0.92);
+        color: white;
+        letter-spacing: 3px;
+        font-size: 14px;
+      }
+      #searchingOverlay .spinner {
+        width: 46px; height: 46px;
+        border: 4px solid rgba(66,207,255,0.2);
+        border-top-color: #42cfff;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
 
-    if (controlPressed("right")) {
-      this.angle +=
-        turn *
-        (this.speed >= 0 ? 1 : -1);
-    }
-
-    if (
-      controlPressed("boost") &&
-      this.boost > 0 &&
-      this.speed > 0
-    ) {
-      this.speed += 0.28;
-      this.boost -= 0.7;
-      this.boosting = true;
-    }
-
-    this.speed = Math.max(
-      -3.2,
-      Math.min(
-        this.speed,
-        this.boosting
-          ? this.boostMax
-          : this.maxSpeed
-      )
-    );
+      #mobileControls {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 40;
+      }
+      #mobileControls button {
+        position: absolute;
+        pointer-events: all;
+        width: 64px; height: 64px;
+        border-radius: 50%;
+        font-size: 11px;
+        padding: 0;
+      }
+      #mcLeft   { bottom: 30px; left: 30px; }
+      #mcRight  { bottom: 30px; left: 104px; }
+      #mcForward{ bottom: 100px; left: 67px; }
+      #mcBack   { bottom: 30px; left: 67px; opacity: 0.001; width:0; height:0; }
+      #mcBoost  { bottom: 55px; right: 30px; width: 80px; height: 80px; }
+    `;
+    document.head.appendChild(style);
   }
 
-  updateAI() {
-    const dxBall =
-      ball.x - this.x;
+  /* =====================================================
+     ECRAN CHOIX PC / MOBILE
+  ===================================================== */
 
-    const dyBall =
-      ball.y - this.y;
+  function buildDeviceMenu() {
+    const div = document.createElement('div');
+    div.id = 'deviceMenu';
+    div.className = 'menu-screen';
+    div.innerHTML = `
+      <div class="menu-content">
+        <div class="logo">
+          <div class="logo-small">WELCOME TO</div>
+          <h1>TURBO<span>BALL</span></h1>
+          <div class="logo-io">.IO</div>
+        </div>
+        <div class="menu-buttons">
+          <button id="choosePc" class="main-button">JOUER SUR PC</button>
+          <button id="chooseMobile" class="secondary-button">JOUER SUR MOBILE</button>
+        </div>
+        <div class="menu-footer">ORIGINAL 2D CAR FOOTBALL GAME</div>
+      </div>
+    `;
+    document.body.appendChild(div);
 
-    const distBall =
-      Math.hypot(
-        dxBall,
-        dyBall
-      );
+    $('choosePc').onclick = () => selectDevice('pc');
+    $('chooseMobile').onclick = () => selectDevice('mobile');
+  }
 
-    let tx = ball.x;
-    let ty = ball.y;
+  function selectDevice(type) {
+    deviceType = type;
+    hide($('deviceMenu'));
+    buildMainMenu();
+  }
 
-    if (
-      ball.x > field.right - 270 &&
-      ball.vx > 0
-    ) {
-      tx = Math.min(
-        field.right - 55,
-        ball.x + 55
-      );
+  /* =====================================================
+     MENU PRINCIPAL (2 colonnes)
+  ===================================================== */
 
-      ty =
-        H / 2 +
-        (ball.y - H / 2) * 0.7;
+  function buildMainMenu() {
+    const mainMenu = $('mainMenu');
+    const content = mainMenu.querySelector('.menu-content');
 
-    } else if (
-      ball.x < W * 0.42
-    ) {
-      tx = ball.x + 45;
-      ty = ball.y;
+    content.innerHTML = `
+      <div class="logo">
+        <div class="logo-small">WELCOME TO</div>
+        <h1>TURBO<span>BALL</span></h1>
+        <div class="logo-io">.IO</div>
+      </div>
+
+      <div id="mainMenuColumns">
+        <div class="menu-column-left">
+          <button id="openSettingsBtn" class="secondary-button">SETTINGS</button>
+          <button id="openShopBtn" class="secondary-button">BOUTIQUE</button>
+        </div>
+        <div class="menu-column-right">
+          <button id="play1v1OnlineBtn" class="main-button">1V1 EN LIGNE</button>
+          <button id="play1v1OfflineBtn" class="main-button">1V1 HORS LIGNE</button>
+        </div>
+      </div>
+
+      <div class="menu-footer">ORIGINAL 2D CAR FOOTBALL GAME</div>
+    `;
+
+    show(mainMenu);
+
+    $('openSettingsBtn').onclick = openSettings;
+    $('openShopBtn').onclick = openShop;
+    $('play1v1OnlineBtn').onclick = () => startMatch('online');
+    $('play1v1OfflineBtn').onclick = () => startMatch('offline');
+  }
+
+  /* =====================================================
+     SETTINGS (rebind ZQSD) - réutilise le HTML existant
+  ===================================================== */
+
+  function refreshSettingsLabels() {
+    $('forwardKeyButton').textContent = controls.forward.toUpperCase();
+    $('reverseKeyButton').textContent = controls.backward.toUpperCase();
+    $('leftKeyButton').textContent = controls.left.toUpperCase();
+    $('rightKeyButton').textContent = controls.right.toUpperCase();
+    $('boostKeyButton').textContent = controls.boost === ' ' ? 'SPACE' : controls.boost.toUpperCase();
+  }
+
+  function openSettings() {
+    hide($('mainMenu'));
+    refreshSettingsLabels();
+    show($('settingsMenu'));
+  }
+
+  function initSettingsMenu() {
+    const keyButtons = [
+      { el: $('forwardKeyButton'), action: 'forward' },
+      { el: $('reverseKeyButton'), action: 'backward' },
+      { el: $('leftKeyButton'), action: 'left' },
+      { el: $('rightKeyButton'), action: 'right' },
+      { el: $('boostKeyButton'), action: 'boost' }
+    ];
+
+    keyButtons.forEach(({ el, action }) => {
+      el.addEventListener('click', () => {
+        keyButtons.forEach(b => b.el.classList.remove('waiting'));
+        rebindingAction = action;
+        el.classList.add('waiting');
+        el.textContent = '...';
+      });
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (!rebindingAction) return;
+      e.preventDefault();
+      const key = e.key === ' ' ? ' ' : e.key.toLowerCase();
+      controls[rebindingAction] = key;
+      saveControls();
+      keyButtons.forEach(b => b.el.classList.remove('waiting'));
+      rebindingAction = null;
+      refreshSettingsLabels();
+    });
+
+    $('resetControlsButton').onclick = () => {
+      controls.forward = 'z';
+      controls.backward = 's';
+      controls.left = 'q';
+      controls.right = 'd';
+      controls.boost = ' ';
+      saveControls();
+      refreshSettingsLabels();
+    };
+
+    $('settingsBackButton').onclick = () => {
+      hide($('settingsMenu'));
+      show($('mainMenu'));
+    };
+  }
+
+  /* =====================================================
+     BOUTIQUE (placeholder)
+  ===================================================== */
+
+  function buildShopMenu() {
+    const div = document.createElement('div');
+    div.id = 'shopMenu';
+    div.className = 'menu-screen hidden';
+    div.innerHTML = `
+      <div class="panel">
+        <h2>BOUTIQUE</h2>
+        <div class="shop-empty">RIEN POUR L'INSTANT</div>
+        <button id="shopBackButton" class="secondary-button">BACK</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+    $('shopBackButton').onclick = () => {
+      hide($('shopMenu'));
+      show($('mainMenu'));
+    };
+  }
+
+  function openShop() {
+    hide($('mainMenu'));
+    show($('shopMenu'));
+  }
+
+  /* =====================================================
+     ECRAN DE RECHERCHE (matchmaking en ligne)
+  ===================================================== */
+
+  function buildSearchingOverlay() {
+    const div = document.createElement('div');
+    div.id = 'searchingOverlay';
+    div.className = 'hidden';
+    div.innerHTML = `
+      <div class="spinner"></div>
+      <div>RECHERCHE D'UN ADVERSAIRE...</div>
+      <button id="cancelSearchBtn" class="secondary-button">ANNULER</button>
+    `;
+    document.body.appendChild(div);
+    $('cancelSearchBtn').onclick = cancelSearch;
+  }
+
+  function cancelSearch() {
+    if (ws) {
+      ws.send(JSON.stringify({ type: 'cancel-search' }));
+      ws.close();
+      ws = null;
+    }
+    hide($('searchingOverlay'));
+    show($('mainMenu'));
+  }
+
+  /* =====================================================
+     LANCEMENT D'UN MATCH
+  ===================================================== */
+
+  function startMatch(chosenMode) {
+    mode = chosenMode;
+    hide($('mainMenu'));
+
+    if (mode === 'offline') {
+      isHost = true;
+      myPlayerNumber = 1;
+      launchMatchIntro();
+      return;
     }
 
-    this.aiThink -= 1 / 60;
+    // mode online
+    show($('searchingOverlay'));
+    ws = new WebSocket(SERVER_URL);
 
-    const dangerous =
-      ball.x > field.right - 270 &&
-      ball.vx > 0;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'find-match' }));
+    };
 
-    if (
-      this.boost < 25 &&
-      distBall > 180 &&
-      !dangerous
-    ) {
-      if (
-        !this.aiTarget ||
-        this.aiThink <= 0 ||
-        this.aiTarget.cooldown > 0
-      ) {
-        let best = null;
-        let bestD = Infinity;
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch (e) { return; }
+      handleServerMessage(data);
+    };
 
-        for (const pad of boostPads) {
-          if (pad.cooldown > 0) continue;
+    ws.onclose = () => {
+      if (running) {
+        endMatchDueToDisconnect();
+      }
+    };
+  }
 
-          const d =
-            Math.hypot(
-              pad.x - this.x,
-              pad.y - this.y
-            );
+  function handleServerMessage(data) {
+    switch (data.type) {
+      case 'connected':
+        break;
 
-          if (d < bestD) {
-            bestD = d;
-            best = pad;
+      case 'searching':
+        break;
+
+      case 'match-found':
+        matchId = data.matchId;
+        myPlayerNumber = data.playerNumber;
+        isHost = data.isHost;
+        hide($('searchingOverlay'));
+        launchMatchIntro();
+        break;
+
+      case 'opponent-input':
+        if (isHost && world) {
+          applyInputToCar(world.cars[1], data.input);
+        }
+        break;
+
+      case 'game-state':
+        if (!isHost && world) {
+          applyRemoteState(data.state);
+        }
+        break;
+
+      case 'opponent-left':
+        endMatchDueToDisconnect();
+        break;
+    }
+  }
+
+  function endMatchDueToDisconnect() {
+    stopGameLoop();
+    showResult('ADVERSAIRE DÉCONNECTÉ', world ? world.scoreBlue : 0, world ? world.scoreOrange : 0);
+  }
+
+  /* =====================================================
+     INTRO DE MATCH + COMPTE A REBOURS
+  ===================================================== */
+
+  function launchMatchIntro() {
+    show($('matchIntro'));
+    setTimeout(() => {
+      hide($('matchIntro'));
+      setupWorld();
+      runCountdown(3, () => {
+        beginPlay();
+      });
+    }, 1800);
+  }
+
+  function runCountdown(n, onDone) {
+    const el = $('countdown');
+    show(el);
+    el.textContent = n;
+    if (n <= 0) {
+      hide(el);
+      onDone();
+      return;
+    }
+    setTimeout(() => runCountdown(n - 1, onDone), 800);
+  }
+
+  /* =====================================================
+     MONDE / OBJETS DU JEU
+  ===================================================== */
+
+  function makeCar(x, y, angle, team) {
+    return {
+      x, y, angle, team,
+      vx: 0, vy: 0,
+      boost: 100,
+      boosting: false
+    };
+  }
+
+  function setupWorld() {
+    canvas = $('gameCanvas');
+    ctx = canvas.getContext('2d');
+
+    world = {
+      cars: [
+        makeCar(FIELD.w * 0.25, FIELD.h / 2, 0, 'blue'),
+        makeCar(FIELD.w * 0.75, FIELD.h / 2, Math.PI, 'orange')
+      ],
+      ball: { x: FIELD.w / 2, y: FIELD.h / 2, vx: 0, vy: 0 },
+      scoreBlue: 0,
+      scoreOrange: 0
+    };
+
+    matchTimeLeft = MATCH_DURATION;
+    updateTimerDisplay();
+    updateScoreDisplay();
+
+    if (deviceType === 'mobile') buildMobileControls();
+  }
+
+  /* =====================================================
+     CONTROLES CLAVIER
+  ===================================================== */
+
+  window.addEventListener('keydown', (e) => {
+    if (rebindingAction) return;
+    keysDown[e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase()] = true;
+    if (e.key.toLowerCase() === 'p' && running) togglePause();
+  });
+  window.addEventListener('keyup', (e) => {
+    keysDown[e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase()] = false;
+  });
+
+  function readLocalInput() {
+    return {
+      forward: !!keysDown[controls.forward] || touchInput.forward,
+      backward: !!keysDown[controls.backward] || touchInput.backward,
+      left: !!keysDown[controls.left] || touchInput.left,
+      right: !!keysDown[controls.right] || touchInput.right,
+      boost: !!keysDown[controls.boost] || touchInput.boost
+    };
+  }
+
+  /* =====================================================
+     CONTROLES MOBILES (placeholder simple)
+  ===================================================== */
+
+  function buildMobileControls() {
+    if ($('mobileControls')) return;
+    const div = document.createElement('div');
+    div.id = 'mobileControls';
+    div.innerHTML = `
+      <button id="mcForward">▲</button>
+      <button id="mcLeft">◀</button>
+      <button id="mcRight">▶</button>
+      <button id="mcBoost">BOOST</button>
+    `;
+    $('arenaContainer').appendChild(div);
+
+    const bind = (id, key) => {
+      const el = $(id);
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); touchInput[key] = true; });
+      el.addEventListener('touchend', (e) => { e.preventDefault(); touchInput[key] = false; });
+      el.addEventListener('mousedown', () => touchInput[key] = true);
+      el.addEventListener('mouseup', () => touchInput[key] = false);
+    };
+
+    bind('mcForward', 'forward');
+    bind('mcLeft', 'left');
+    bind('mcRight', 'right');
+    bind('mcBoost', 'boost');
+  }
+
+  /* =====================================================
+     PHYSIQUE
+  ===================================================== */
+
+  function applyInputToCar(car, input) {
+    car._pendingInput = input;
+  }
+
+  function simulateCar(car, input, dt) {
+    const speed = Math.hypot(car.vx, car.vy);
+    const boosting = input.boost && car.boost > 0;
+    const maxSpeed = boosting ? CAR_CFG.maxSpeedBoost : CAR_CFG.maxSpeed;
+
+    if (input.left) car.angle -= CAR_CFG.turnSpeed * dt * 60;
+    if (input.right) car.angle += CAR_CFG.turnSpeed * dt * 60;
+
+    let thrust = 0;
+    if (input.forward) thrust = CAR_CFG.accel * (boosting ? 1.8 : 1);
+    if (input.backward) thrust = -CAR_CFG.reverseAccel;
+
+    car.vx += Math.cos(car.angle) * thrust * dt * 60;
+    car.vy += Math.sin(car.angle) * thrust * dt * 60;
+
+    car.vx *= CAR_CFG.friction;
+    car.vy *= CAR_CFG.friction;
+
+    const newSpeed = Math.hypot(car.vx, car.vy);
+    if (newSpeed > maxSpeed) {
+      const ratio = maxSpeed / newSpeed;
+      car.vx *= ratio;
+      car.vy *= ratio;
+    }
+
+    car.x += car.vx * dt * 60;
+    car.y += car.vy * dt * 60;
+
+    car.x = Math.max(CAR_CFG.width / 2, Math.min(FIELD.w - CAR_CFG.width / 2, car.x));
+    car.y = Math.max(CAR_CFG.height / 2, Math.min(FIELD.h - CAR_CFG.height / 2, car.y));
+
+    if (boosting) {
+      car.boost = Math.max(0, car.boost - CAR_CFG.boostDrain * dt);
+    } else {
+      car.boost = Math.min(100, car.boost + CAR_CFG.boostRegen * dt);
+    }
+    car.boosting = boosting;
+    car.speed = newSpeed;
+  }
+
+  function simulateBall(ball, dt) {
+    ball.x += ball.vx * dt * 60;
+    ball.y += ball.vy * dt * 60;
+    ball.vx *= BALL_CFG.friction;
+    ball.vy *= BALL_CFG.friction;
+
+    const r = BALL_CFG.radius;
+    const goalTop = FIELD.h / 2 - FIELD.goalHeight / 2;
+    const goalBottom = FIELD.h / 2 + FIELD.goalHeight / 2;
+    const insideGoalY = ball.y > goalTop && ball.y < goalBottom;
+
+    if (ball.y - r < 0) { ball.y = r; ball.vy *= -BALL_CFG.wallBounce; }
+    if (ball.y + r > FIELD.h) { ball.y = FIELD.h - r; ball.vy *= -BALL_CFG.wallBounce; }
+
+    if (!insideGoalY) {
+      if (ball.x - r < 0) { ball.x = r; ball.vx *= -BALL_CFG.wallBounce; }
+      if (ball.x + r > FIELD.w) { ball.x = FIELD.w - r; ball.vx *= -BALL_CFG.wallBounce; }
+    }
+
+    const speed = Math.hypot(ball.vx, ball.vy);
+    if (speed > BALL_CFG.maxSpeed) {
+      const ratio = BALL_CFG.maxSpeed / speed;
+      ball.vx *= ratio;
+      ball.vy *= ratio;
+    }
+  }
+
+  function carBallCollision(car, ball) {
+    const dx = ball.x - car.x;
+    const dy = ball.y - car.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = BALL_CFG.radius + Math.max(CAR_CFG.width, CAR_CFG.height) / 2.2;
+
+    if (dist < minDist && dist > 0) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
+
+      ball.x += nx * overlap;
+      ball.y += ny * overlap;
+
+      const impactForce = Math.hypot(car.vx, car.vy) * 1.4 + 3;
+      ball.vx += nx * impactForce;
+      ball.vy += ny * impactForce;
+    }
+  }
+
+  function checkGoal() {
+    const ball = world.ball;
+    const r = BALL_CFG.radius;
+    const goalTop = FIELD.h / 2 - FIELD.goalHeight / 2;
+    const goalBottom = FIELD.h / 2 + FIELD.goalHeight / 2;
+
+    if (ball.x + r < -FIELD.goalDepth && ball.y > goalTop && ball.y < goalBottom) {
+      onGoalScored('orange');
+    } else if (ball.x - r > FIELD.w + FIELD.goalDepth && ball.y > goalTop && ball.y < goalBottom) {
+      onGoalScored('blue');
+    }
+  }
+
+  function onGoalScored(scoringTeam) {
+    if (scoringTeam === 'blue') world.scoreBlue++;
+    else world.scoreOrange++;
+
+    updateScoreDisplay();
+    showGoalMessage(scoringTeam);
+
+    world.ball.x = FIELD.w / 2;
+    world.ball.y = FIELD.h / 2;
+    world.ball.vx = 0;
+    world.ball.vy = 0;
+    world.cars[0].x = FIELD.w * 0.25; world.cars[0].y = FIELD.h / 2; world.cars[0].vx = 0; world.cars[0].vy = 0;
+    world.cars[1].x = FIELD.w * 0.75; world.cars[1].y = FIELD.h / 2; world.cars[1].vx = 0; world.cars[1].vy = 0;
+  }
+
+  function showGoalMessage(team) {
+    const msg = $('goalMessage');
+    $('goalScorer').textContent = team === 'blue' ? 'BLUE UNIT' : 'ORANGE CREW';
+    show(msg);
+    setTimeout(() => hide(msg), 1500);
+  }
+
+  /* =====================================================
+     BOT (mode hors ligne)
+  ===================================================== */
+
+  function botInput(car, ball) {
+    const dx = ball.x - car.x;
+    const dy = ball.y - car.y;
+    const targetAngle = Math.atan2(dy, dx);
+    let diff = targetAngle - car.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+
+    return {
+      forward: true,
+      backward: false,
+      left: diff < -0.05,
+      right: diff > 0.05,
+      boost: Math.hypot(dx, dy) > 300
+    };
+  }
+
+  /* =====================================================
+     BOUCLE DE JEU
+  ===================================================== */
+
+  function beginPlay() {
+    running = true;
+    paused = false;
+    lastTimestamp = performance.now();
+
+    timerInterval = setInterval(() => {
+      if (paused) return;
+      matchTimeLeft--;
+      updateTimerDisplay();
+      if (matchTimeLeft <= 0) endMatch();
+    }, 1000);
+
+    animFrameId = requestAnimationFrame(gameLoop);
+
+    let lastNetworkSend = 0;
+
+    function gameLoop(ts) {
+      if (!running) return;
+      const dt = Math.min(0.033, (ts - lastTimestamp) / 1000);
+      lastTimestamp = ts;
+
+      if (!paused) {
+        if (isHost) {
+          const myInput = readLocalInput();
+          simulateCar(world.cars[0], myInput, dt);
+
+          let p2Input;
+          if (mode === 'offline') {
+            p2Input = botInput(world.cars[1], world.ball);
+          } else {
+            p2Input = world.cars[1]._pendingInput || { forward: false, backward: false, left: false, right: false, boost: false };
           }
+          simulateCar(world.cars[1], p2Input, dt);
+
+          simulateBall(world.ball, dt);
+          carBallCollision(world.cars[0], world.ball);
+          carBallCollision(world.cars[1], world.ball);
+          checkGoal();
+
+          if (mode === 'online' && ts - lastNetworkSend > 33) {
+            lastNetworkSend = ts;
+            ws.send(JSON.stringify({
+              type: 'game-state',
+              state: {
+                cars: world.cars,
+                ball: world.ball,
+                scoreBlue: world.scoreBlue,
+                scoreOrange: world.scoreOrange,
+                timeLeft: matchTimeLeft
+              }
+            }));
+          }
+        } else {
+          const myInput = readLocalInput();
+          ws.send(JSON.stringify({ type: 'input', input: myInput }));
         }
 
-        this.aiTarget = best;
-        this.aiThink = 0.5;
+        updateHud();
       }
 
-      if (this.aiTarget) {
-        tx = this.aiTarget.x;
-        ty = this.aiTarget.y;
-      }
-
-    } else if (
-      this.boost > 45 ||
-      dangerous
-    ) {
-      this.aiTarget = null;
-    }
-
-    const targetAngle =
-      Math.atan2(
-        ty - this.y,
-        tx - this.x
-      );
-
-    let diff =
-      targetAngle -
-      this.angle;
-
-    while (diff > Math.PI) {
-      diff -= Math.PI * 2;
-    }
-
-    while (diff < -Math.PI) {
-      diff += Math.PI * 2;
-    }
-
-    const turn = 0.062;
-
-    if (diff > 0.06) {
-      this.angle += turn;
-    } else if (diff < -0.06) {
-      this.angle -= turn;
-    }
-
-    const aligned =
-      Math.abs(diff) < 0.32;
-
-    const attack =
-      ball.x < W * 0.55 &&
-      this.x > ball.x;
-
-    this.boosting =
-      this.boost > 4 &&
-      aligned &&
-      (
-        distBall > 260 ||
-        attack ||
-        !!this.aiTarget
-      );
-
-    this.speed +=
-      this.boosting
-        ? 0.24
-        : 0.145;
-
-    if (this.boosting) {
-      this.boost -= 0.55;
-    }
-
-    this.speed = Math.min(
-      this.speed,
-      this.boosting
-        ? 9.6
-        : 6.7
-    );
-
-    if (this.aiTarget) {
-      const d =
-        Math.hypot(
-          this.aiTarget.x - this.x,
-          this.aiTarget.y - this.y
-        );
-
-      if (
-        d <
-          this.radius + 22 &&
-        this.aiTarget.cooldown <= 0
-      ) {
-        this.boost =
-          Math.min(
-            100,
-            this.boost + 25
-          );
-
-        this.aiTarget.cooldown = 5;
-        this.aiTarget.flash = 1;
-
-        spawnPadParticles(
-          this.aiTarget
-        );
-
-        this.aiTarget = null;
-      }
+      render();
+      animFrameId = requestAnimationFrame(gameLoop);
     }
   }
 
-  keepInside() {
-    const r = this.radius;
-
-    if (this.x < field.left + r) {
-      this.x = field.left + r;
-      this.speed *= -0.3;
-    }
-
-    if (this.x > field.right - r) {
-      this.x = field.right - r;
-      this.speed *= -0.3;
-    }
-
-    if (this.y < field.top + r) {
-      this.y = field.top + r;
-      this.speed *= -0.3;
-    }
-
-    if (this.y > field.bottom - r) {
-      this.y = field.bottom - r;
-      this.speed *= -0.3;
-    }
-  }
-
-  draw() {
-    ctx.save();
-
-    ctx.translate(
-      this.x,
-      this.y
-    );
-
-    ctx.rotate(this.angle);
-
-    if (this.boosting) {
-      ctx.fillStyle =
-        "rgba(80,220,255,.7)";
-
-      ctx.beginPath();
-
-      ctx.moveTo(
-        -35,
-        -11
-      );
-
-      ctx.lineTo(
-        -65 -
-          Math.random() * 18,
-        0
-      );
-
-      ctx.lineTo(
-        -35,
-        11
-      );
-
-      ctx.fill();
-    }
-
-    ctx.shadowColor = this.color;
-    ctx.shadowBlur = 18;
-
-    ctx.fillStyle = this.color;
-
-    roundRect(
-      -28,
-      -17,
-      56,
-      34,
-      10
-    );
-
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = "#08101a";
-
-    roundRect(
-      -5,
-      -12,
-      24,
-      24,
-      7
-    );
-
-    ctx.fill();
-
-    ctx.fillStyle = "#fff";
-
-    ctx.fillRect(
-      20,
-      -9,
-      5,
-      7
-    );
-
-    ctx.fillRect(
-      20,
-      2,
-      5,
-      7
-    );
-
-    ctx.fillStyle = "#05070b";
-
-    ctx.fillRect(
-      -18,
-      -22,
-      12,
-      7
-    );
-
-    ctx.fillRect(
-      8,
-      -22,
-      12,
-      7
-    );
-
-    ctx.fillRect(
-      -18,
-      15,
-      12,
-      7
-    );
-
-    ctx.fillRect(
-      8,
-      15,
-      12,
-      7
-    );
-
-    ctx.restore();
-  }
-}
-
-class Ball {
-  constructor() {
-    this.radius = 18;
-    this.reset();
-  }
-
-  reset() {
-    this.x = W / 2;
-    this.y = H / 2;
-
-    this.vx = 0;
-    this.vy = 0;
-  }
-
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-
-    this.vx *= 0.992;
-    this.vy *= 0.992;
-
-    const s =
-      Math.hypot(
-        this.vx,
-        this.vy
-      );
-
-    if (s > 9) {
-      this.vx =
-        this.vx / s * 9;
-
-      this.vy =
-        this.vy / s * 9;
-    }
-
-    this.checkGoal();
-
-    if (!goalActive) {
-      this.walls();
-    }
-  }
-
-  checkGoal() {
-    const inOpening =
-      this.y + this.radius >
-        goal.top &&
-      this.y - this.radius <
-        goal.bottom;
-
-    if (!inOpening) return;
-
-    if (
-      this.x - this.radius <=
-      field.left - 2
-    ) {
-      scoreGoal("orange");
-
-    } else if (
-      this.x + this.radius >=
-      field.right + 2
-    ) {
-      scoreGoal("blue");
-    }
-  }
-
-  walls() {
-    if (
-      this.y - this.radius <
-      field.top
-    ) {
-      this.y =
-        field.top +
-        this.radius;
-
-      this.vy *= -0.82;
-    }
-
-    if (
-      this.y + this.radius >
-      field.bottom
-    ) {
-      this.y =
-        field.bottom -
-        this.radius;
-
-      this.vy *= -0.82;
-    }
-
-    const inOpening =
-      this.y + this.radius >
-        goal.top &&
-      this.y - this.radius <
-        goal.bottom;
-
-    if (
-      this.x - this.radius <
-        field.left &&
-      !inOpening
-    ) {
-      this.x =
-        field.left +
-        this.radius;
-
-      this.vx *= -0.82;
-    }
-
-    if (
-      this.x + this.radius >
-        field.right &&
-      !inOpening
-    ) {
-      this.x =
-        field.right -
-        this.radius;
-
-      this.vx *= -0.82;
-    }
-
-    if (
-      inOpening &&
-      this.x <
-        field.left -
-        goal.depth +
-        this.radius
-    ) {
-      this.x =
-        field.left -
-        goal.depth +
-        this.radius;
-
-      this.vx *= -0.82;
-    }
-
-    if (
-      inOpening &&
-      this.x >
-        field.right +
-        goal.depth -
-        this.radius
-    ) {
-      this.x =
-        field.right +
-        goal.depth -
-        this.radius;
-
-      this.vx *= -0.82;
-    }
-  }
-
-  draw() {
-    ctx.save();
-
-    ctx.shadowColor = "#fff";
-    ctx.shadowBlur = 18;
-
-    const g =
-      ctx.createRadialGradient(
-        this.x - 6,
-        this.y - 7,
-        2,
-        this.x,
-        this.y,
-        this.radius
-      );
-
-    g.addColorStop(
-      0,
-      "#fff"
-    );
-
-    g.addColorStop(
-      .55,
-      "#dce7f0"
-    );
-
-    g.addColorStop(
-      1,
-      "#7d91a3"
-    );
-
-    ctx.fillStyle = g;
-
-    ctx.beginPath();
-
-    ctx.arc(
-      this.x,
-      this.y,
-      this.radius,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.restore();
-  }
-}
-
-const player =
-  new Car(
-    350,
-    H / 2,
-    "#20cfff"
-  );
-
-const bot =
-  new Car(
-    W - 350,
-    H / 2,
-    "#ff8a18",
-    true
-  );
-
-const ball = new Ball();
-
-function playerInSaveZone() {
-  return (
-    player.x >= saveZone.x &&
-    player.x <=
-      saveZone.x +
-      saveZone.width &&
-    player.y >= saveZone.y &&
-    player.y <=
-      saveZone.y +
-      saveZone.height
-  );
-}
-
-function ballDangerous() {
-  const inLane =
-    ball.y + ball.radius >
-      goal.top &&
-    ball.y - ball.radius <
-      goal.bottom;
-
-  const close =
-    ball.x <
-    field.left + 250;
-
-  return (
-    inLane &&
-    close &&
-    (
-      ball.vx < -0.1 ||
-      ball.x <
-        field.left + 105
-    )
-  );
-}
-
-function carBallCollision(car) {
-  const dx =
-    ball.x - car.x;
-
-  const dy =
-    ball.y - car.y;
-
-  const d =
-    Math.hypot(
-      dx,
-      dy
-    );
-
-  const minD =
-    car.radius +
-    ball.radius;
-
-  if (d >= minD) {
-    car.ballContact = false;
-    return;
-  }
-
-  const dangerousBefore =
-    car === player &&
-    ballDangerous();
-
-  const newContact =
-    !car.ballContact;
-
-  car.ballContact = true;
-
-  if (
-    car === player &&
-    newContact
-  ) {
-    awardPoints(
-      2,
-      "BALL TOUCH"
-    );
-  }
-
-  const safeD =
-    d || 0.001;
-
-  const nx =
-    dx / safeD;
-
-  const ny =
-    dy / safeD;
-
-  const overlap =
-    minD - d;
-
-  ball.x +=
-    nx * overlap;
-
-  ball.y +=
-    ny * overlap;
-
-  const force =
-    Math.min(
-      Math.abs(car.speed) * 1.15 +
-      1.2,
-      7
-    );
-
-  ball.vx +=
-    nx * force;
-
-  ball.vy +=
-    ny * force;
-
-  ball.vx +=
-    Math.cos(car.angle) *
-    Math.abs(car.speed) *
-    0.25;
-
-  ball.vy +=
-    Math.sin(car.angle) *
-    Math.abs(car.speed) *
-    0.25;
-
-  car.speed *= 0.82;
-
-  if (
-    car === player &&
-    newContact &&
-    dangerousBefore &&
-    playerInSaveZone() &&
-    saveCooldown <= 0
-  ) {
-    saveCooldown = 4;
-    saveDangerHandled = true;
-
-    ball.vx =
-      Math.max(
-        1.8,
-        Math.abs(ball.vx) * 0.65
-      );
-
-    ball.vy *= 0.65;
-
-    awardPoints(
-      50,
-      "SAVE"
-    );
-  }
-}
-
-function carCarCollision(a, b) {
-  const dx =
-    b.x - a.x;
-
-  const dy =
-    b.y - a.y;
-
-  const d =
-    Math.hypot(
-      dx,
-      dy
-    );
-
-  const minD =
-    a.radius +
-    b.radius;
-
-  if (
-    d <= 0 ||
-    d >= minD
-  ) {
-    return;
-  }
-
-  const nx =
-    dx / d;
-
-  const ny =
-    dy / d;
-
-  const overlap =
-    minD - d;
-
-  a.x -=
-    nx * overlap / 2;
-
-  a.y -=
-    ny * overlap / 2;
-
-  b.x +=
-    nx * overlap / 2;
-
-  b.y +=
-    ny * overlap / 2;
-
-  const av = a.speed;
-
-  a.speed =
-    b.speed * 0.55;
-
-  b.speed =
-    av * 0.55;
-
-  a.keepInside();
-  b.keepInside();
-}
-
-function spawnPadParticles(pad) {
-  for (let i = 0; i < 10; i++) {
-    const a =
-      Math.PI * 2 * i / 10;
-
-    const s =
-      1.2 +
-      Math.random() * 1.4;
-
-    boostParticles.push({
-      x: pad.x,
-      y: pad.y,
-      vx: Math.cos(a) * s,
-      vy: Math.sin(a) * s,
-      life: 0.55,
-      size:
-        2 +
-        Math.random() * 2,
-      color: pad.color
-    });
-  }
-}
-
-function spawnGoalParticles(team) {
-  const color =
-    team === "blue"
-      ? "#43d9ff"
-      : "#ff9d2e";
-
-  for (let i = 0; i < 32; i++) {
-    const a =
-      Math.random() *
-      Math.PI * 2;
-
-    const s =
-      1.5 +
-      Math.random() * 3.5;
-
-    goalParticles.push({
-      x: W / 2,
-      y: H / 2,
-      vx: Math.cos(a) * s,
-      vy: Math.sin(a) * s,
-      life: 1.1,
-      size:
-        2 +
-        Math.random() * 4,
-      color
-    });
-  }
-}
-
-function updateEffects(dt) {
-  const sec =
-    Math.min(
-      dt / 1000,
-      0.1
-    );
-
-  goalFlash =
-    Math.max(
-      0,
-      goalFlash -
-      sec * 2.2
-    );
-
-  for (
-    const list of [
-      boostParticles,
-      goalParticles
-    ]
-  ) {
-    for (const p of list) {
-      p.x += p.vx;
-      p.y += p.vy;
-
-      p.vx *= 0.97;
-      p.vy *= 0.97;
-
-      p.life -= sec;
-    }
-
-    for (
-      let i = list.length - 1;
-      i >= 0;
-      i--
-    ) {
-      if (list[i].life <= 0) {
-        list.splice(i, 1);
-      }
-    }
-  }
-
-  saveCooldown =
-    Math.max(
-      0,
-      saveCooldown - sec
-    );
-
-  if (!ballDangerous()) {
-    saveDangerHandled = false;
-  }
-}
-
-function updateBoostPads(dt) {
-  const sec =
-    Math.min(
-      dt / 1000,
-      0.1
-    );
-
-  for (const p of boostPads) {
-    p.cooldown =
-      Math.max(
-        0,
-        p.cooldown - sec
-      );
-
-    p.pulse +=
-      sec * 2.4;
-
-    p.flash =
-      Math.max(
-        0,
-        p.flash -
-        sec * 2.5
-      );
-  }
-
-  if (
-    !gameRunning ||
-    paused ||
-    goalActive
-  ) {
-    return;
-  }
-
-  for (const p of boostPads) {
-    if (p.cooldown > 0) continue;
-
-    if (
-      Math.hypot(
-        player.x - p.x,
-        player.y - p.y
-      ) <
-      player.radius + 22
-    ) {
-      player.boost =
-        Math.min(
-          100,
-          player.boost + 25
-        );
-
-      p.cooldown = 5;
-      p.flash = 1;
-
-      spawnPadParticles(p);
-    }
-  }
-}
-
-function scoreGoal(team) {
-  if (
-    goalActive ||
-    !gameRunning
-  ) {
-    return;
-  }
-
-  goalActive = true;
-
-  clearKeys();
-
-  // CORRECTION :
-  // Les voitures et la balle sont replacées
-  // immédiatement au moment du but.
-  resetPositions();
-
-  goalFlash = 1;
-
-  spawnGoalParticles(team);
-
-  if (team === "blue") {
-    blueScore++;
-
-    setText(
-      blueScoreEl,
-      blueScore
-    );
-
-    awardPoints(
-      150,
-      "GOAL"
-    );
-
-    setText(
-      goalText,
-      "GOAL!"
-    );
-
-    setText(
-      goalScorer,
-      "BLUE UNIT SCORES"
-    );
-
-    if (goalText) {
-      goalText.style.color =
-        "#43d9ff";
-
-      goalText.style.textShadow =
-        "0 0 25px #00aaff,0 0 80px #0077ff";
-    }
-
-  } else {
-    orangeScore++;
-
-    setText(
-      orangeScoreEl,
-      orangeScore
-    );
-
-    setText(
-      goalText,
-      "GOAL!"
-    );
-
-    setText(
-      goalScorer,
-      "ORANGE CREW SCORES"
-    );
-
-    if (goalText) {
-      goalText.style.color =
-        "#ff9d2e";
-
-      goalText.style.textShadow =
-        "0 0 25px #ff6600,0 0 80px #ff3300";
-    }
-  }
-
-  goalMessage?.classList.remove(
-    "hidden"
-  );
-
-  goalTimer =
-    setTimeout(() => {
-      goalMessage?.classList.add(
-        "hidden"
-      );
-
-      startCountdown();
-    }, 1800);
-}
-
-function resetPositions() {
-  player.reset();
-  bot.reset();
-  ball.reset();
-
-  saveDangerHandled = false;
-}
-
-function startCountdown() {
-  clearInterval(
-    countdownTimer
-  );
-
-  clearTimeout(
-    countdownFinish
-  );
-
-  goalActive = true;
-
-  let count = 3;
-
-  setText(
-    countdownEl,
-    count
-  );
-
-  countdownEl?.classList.remove(
-    "hidden"
-  );
-
-  countdownTimer =
-    setInterval(() => {
-      count--;
-
-      if (count > 0) {
-        setText(
-          countdownEl,
-          count
-        );
-
-      } else {
-        clearInterval(
-          countdownTimer
-        );
-
-        countdownTimer = null;
-
-        setText(
-          countdownEl,
-          "GO!"
-        );
-
-        countdownFinish =
-          setTimeout(() => {
-            countdownEl?.classList.add(
-              "hidden"
-            );
-
-            goalActive = false;
-          }, 700);
-      }
-    }, 1000);
-}
-
-function updateTimer(dt) {
-  if (
-    !gameRunning ||
-    paused ||
-    goalActive
-  ) {
-    return;
-  }
-
-  gameTime -=
-    dt / 1000;
-
-  if (gameTime <= 0) {
-    gameTime = 0;
-
+  function applyRemoteState(state) {
+    world.cars[0] = state.cars[0];
+    world.cars[1] = state.cars[1];
+    world.ball = state.ball;
+    world.scoreBlue = state.scoreBlue;
+    world.scoreOrange = state.scoreOrange;
+    matchTimeLeft = state.timeLeft;
+    updateScoreDisplay();
     updateTimerDisplay();
-
-    endMatch(false);
-
-    return;
   }
 
-  updateTimerDisplay();
-}
-
-function updateTimerDisplay() {
-  const m =
-    Math.floor(
-      gameTime / 60
-    );
-
-  const s =
-    Math.floor(
-      gameTime % 60
-    );
-
-  setText(
-    timerEl,
-    `${m}:${String(s).padStart(2, "0")}`
-  );
-}
-
-function endMatch(conceded = false) {
-  if (
-    !gameRunning &&
-    !conceded
-  ) {
-    return;
+  function stopGameLoop() {
+    running = false;
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+    if (timerInterval) clearInterval(timerInterval);
   }
 
-  gameRunning = false;
-  paused = false;
-  goalActive = true;
+  /* =====================================================
+     RENDU
+  ===================================================== */
 
-  clearKeys();
+  function render() {
+    ctx.clearRect(0, 0, FIELD.w, FIELD.h);
 
-  clearInterval(
-    countdownTimer
-  );
+    ctx.fillStyle = '#0a1c2e';
+    ctx.fillRect(0, 0, FIELD.w, FIELD.h);
 
-  clearTimeout(
-    countdownFinish
-  );
-
-  clearTimeout(
-    goalTimer
-  );
-
-  clearTimeout(
-    introTimer
-  );
-
-  pauseMenu?.classList.add(
-    "hidden"
-  );
-
-  matchIntro?.classList.add(
-    "hidden"
-  );
-
-  concedeConfirm?.classList.add(
-    "hidden"
-  );
-
-  settingsMenu?.classList.add(
-    "hidden"
-  );
-
-  goalMessage?.classList.add(
-    "hidden"
-  );
-
-  if (conceded) {
-    setText(
-      winnerDisplay,
-      "ORANGE WINS"
-    );
-
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
-
-  } else if (
-    blueScore >
-    orangeScore
-  ) {
-    setText(
-      winnerDisplay,
-      "BLUE WINS"
-    );
-
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#43cfff";
-    }
-
-  } else if (
-    orangeScore >
-    blueScore
-  ) {
-    setText(
-      winnerDisplay,
-      "ORANGE WINS"
-    );
-
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#ff8a20";
-    }
-
-  } else {
-    setText(
-      winnerDisplay,
-      "DRAW"
-    );
-
-    if (winnerDisplay) {
-      winnerDisplay.style.color =
-        "#fff";
-    }
-  }
-
-  setText(
-    finalBlueScore,
-    blueScore
-  );
-
-  setText(
-    finalOrangeScore,
-    orangeScore
-  );
-
-  resultScreen?.classList.remove(
-    "hidden"
-  );
-}
-
-function startMatch() {
-  clearInterval(
-    countdownTimer
-  );
-
-  clearTimeout(
-    countdownFinish
-  );
-
-  clearTimeout(
-    goalTimer
-  );
-
-  clearTimeout(
-    introTimer
-  );
-
-  clearKeys();
-
-  resetPoints();
-
-  boostParticles.length = 0;
-  goalParticles.length = 0;
-
-  goalFlash = 0;
-
-  for (const p of boostPads) {
-    p.cooldown = 0;
-    p.flash = 0;
-  }
-
-  blueScore = 0;
-  orangeScore = 0;
-
-  gameTime = 120;
-
-  paused = false;
-  gameRunning = true;
-  goalActive = true;
-
-  setText(
-    blueScoreEl,
-    0
-  );
-
-  setText(
-    orangeScoreEl,
-    0
-  );
-
-  updateTimerDisplay();
-
-  resetPositions();
-
-  gameWrapper?.classList.remove(
-    "hidden"
-  );
-
-  mainMenu?.classList.add(
-    "hidden"
-  );
-
-  howToPlayMenu?.classList.add(
-    "hidden"
-  );
-
-  settingsMenu?.classList.add(
-    "hidden"
-  );
-
-  resultScreen?.classList.add(
-    "hidden"
-  );
-
-  pauseMenu?.classList.add(
-    "hidden"
-  );
-
-  concedeConfirm?.classList.add(
-    "hidden"
-  );
-
-  matchIntro?.classList.remove(
-    "hidden"
-  );
-
-  introTimer =
-    setTimeout(() => {
-      if (!gameRunning) return;
-
-      matchIntro?.classList.add(
-        "hidden"
-      );
-
-      startCountdown();
-    }, 900);
-}
-
-function showMainMenu() {
-  clearInterval(
-    countdownTimer
-  );
-
-  clearTimeout(
-    countdownFinish
-  );
-
-  clearTimeout(
-    goalTimer
-  );
-
-  clearTimeout(
-    introTimer
-  );
-
-  clearKeys();
-
-  gameRunning = false;
-  paused = false;
-  goalActive = false;
-
-  resetPoints();
-
-  matchIntro?.classList.add(
-    "hidden"
-  );
-
-  howToPlayMenu?.classList.add(
-    "hidden"
-  );
-
-  settingsMenu?.classList.add(
-    "hidden"
-  );
-
-  resultScreen?.classList.add(
-    "hidden"
-  );
-
-  pauseMenu?.classList.add(
-    "hidden"
-  );
-
-  concedeConfirm?.classList.add(
-    "hidden"
-  );
-
-  countdownEl?.classList.add(
-    "hidden"
-  );
-
-  goalMessage?.classList.add(
-    "hidden"
-  );
-
-  gameWrapper?.classList.add(
-    "hidden"
-  );
-
-  mainMenu?.classList.remove(
-    "hidden"
-  );
-}
-
-function togglePause() {
-  if (
-    !gameRunning ||
-    goalActive
-  ) {
-    return;
-  }
-
-  paused = !paused;
-
-  clearKeys();
-
-  if (paused) {
-    pauseMenu?.classList.remove(
-      "hidden"
-    );
-  } else {
-    pauseMenu?.classList.add(
-      "hidden"
-    );
-
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
-
-    settingsMenu?.classList.add(
-      "hidden"
-    );
-  }
-}
-
-/* =========================================================
-   BOUTON RESUME
-========================================================= */
-
-$("resumeButton")?.addEventListener(
-  "click",
-  () => {
-    if (!gameRunning) return;
-
-    paused = false;
-
-    clearKeys();
-
-    pauseMenu?.classList.add(
-      "hidden"
-    );
-
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
-
-    settingsMenu?.classList.add(
-      "hidden"
-    );
-  }
-);
-
-/* =========================================================
-   BOUTON SETTINGS DEPUIS LA PAUSE
-========================================================= */
-
-$("pauseSettingsButton")?.addEventListener(
-  "click",
-  () => {
-    if (!gameRunning) return;
-
-    paused = true;
-
-    openSettings("pause");
-  }
-);
-
-/* =========================================================
-   BOUTON CONCEDER
-========================================================= */
-
-$("concedeButton")?.addEventListener(
-  "click",
-  () => {
-    if (!gameRunning) return;
-
-    concedeConfirm?.classList.remove(
-      "hidden"
-    );
-  }
-);
-
-/* =========================================================
-   ANNULER CONCEDER
-========================================================= */
-
-$("cancelConcedeButton")?.addEventListener(
-  "click",
-  () => {
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
-
-    if (gameRunning && paused) {
-      pauseMenu?.classList.remove(
-        "hidden"
-      );
-    }
-  }
-);
-
-/* =========================================================
-   CONFIRMER CONCEDER
-========================================================= */
-
-$("confirmConcedeButton")?.addEventListener(
-  "click",
-  () => {
-    concedeConfirm?.classList.add(
-      "hidden"
-    );
-
-    endMatch(true);
-  }
-);
-
-/* =========================================================
-   RETOUR MENU PRINCIPAL DEPUIS LA PAUSE
-========================================================= */
-
-$("pauseMainMenuButton")?.addEventListener(
-  "click",
-  () => {
-    showMainMenu();
-  }
-);
-
-/* =========================================================
-   BOUTONS DE MATCH
-========================================================= */
-
-$("playButton")?.addEventListener(
-  "click",
-  startMatch
-);
-
-playAgainButton?.addEventListener(
-  "click",
-  startMatch
-);
-
-mainMenuButton?.addEventListener(
-  "click",
-  showMainMenu
-);
-
-$("restartButton")?.addEventListener(
-  "click",
-  startMatch
-);
-
-function drawArena() {
-  ctx.fillStyle = "#06131f";
-
-  ctx.fillRect(
-    0,
-    0,
-    W,
-    H
-  );
-
-  ctx.strokeStyle =
-    "rgba(80,180,255,.08)";
-
-  ctx.lineWidth = 1;
-
-  for (
-    let x = 0;
-    x < W;
-    x += 60
-  ) {
-    ctx.beginPath();
-
-    ctx.moveTo(
-      x,
-      0
-    );
-
-    ctx.lineTo(
-      x,
-      H
-    );
-
-    ctx.stroke();
-  }
-
-  for (
-    let y = 0;
-    y < H;
-    y += 60
-  ) {
-    ctx.beginPath();
-
-    ctx.moveTo(
-      0,
-      y
-    );
-
-    ctx.lineTo(
-      W,
-      y
-    );
-
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle =
-    "rgba(120,220,255,.35)";
-
-  ctx.lineWidth = 3;
-
-  ctx.strokeRect(
-    field.left,
-    field.top,
-    field.right - field.left,
-    field.bottom - field.top
-  );
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    W / 2,
-    field.top
-  );
-
-  ctx.lineTo(
-    W / 2,
-    field.bottom
-  );
-
-  ctx.stroke();
-
-  ctx.beginPath();
-
-  ctx.arc(
-    W / 2,
-    H / 2,
-    85,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.stroke();
-
-  ctx.fillStyle =
-    "#72eaff";
-
-  ctx.beginPath();
-
-  ctx.arc(
-    W / 2,
-    H / 2,
-    5,
-    0,
-    Math.PI * 2
-  );
-
-  ctx.fill();
-
-  ctx.lineWidth = 5;
-
-  ctx.shadowBlur = 18;
-
-  ctx.strokeStyle =
-    "#18cfff";
-
-  ctx.shadowColor =
-    "#00aaff";
-
-  ctx.strokeRect(
-    field.left - goal.depth,
-    goal.top,
-    goal.depth,
-    goal.bottom - goal.top
-  );
-
-  ctx.strokeStyle =
-    "#ff851b";
-
-  ctx.shadowColor =
-    "#ff5e00";
-
-  ctx.strokeRect(
-    field.right,
-    goal.top,
-    goal.depth,
-    goal.bottom - goal.top
-  );
-
-  ctx.shadowBlur = 0;
-
-  drawBoostPads();
-}
-
-function drawBoostPads() {
-  for (const p of boostPads) {
-    const available =
-      p.cooldown <= 0;
-
-    const pulse =
-      1 +
-      Math.sin(p.pulse) *
-      0.08;
-
-    ctx.save();
-
-    ctx.translate(
-      p.x,
-      p.y
-    );
-
-    ctx.globalAlpha =
-      available
-        ? 1
-        : 0.35;
-
-    ctx.shadowColor =
-      p.color;
-
-    ctx.shadowBlur =
-      available
-        ? 22
-        : 8;
-
-    ctx.fillStyle =
-      "rgba(8,18,30,.9)";
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-      0,
-      0,
-      28 * pulse,
-      16 * pulse,
-      0,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.fillStyle =
-      p.color;
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-      0,
-      0,
-      19 * pulse,
-      8 * pulse,
-      0,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.strokeStyle =
-      "#fff";
-
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 2;
-
+    ctx.strokeRect(4, 4, FIELD.w - 8, FIELD.h - 8);
     ctx.beginPath();
-
-    ctx.arc(
-      0,
-      0,
-      23 * pulse,
-      0,
-      Math.PI * 2
-    );
-
+    ctx.moveTo(FIELD.w / 2, 0);
+    ctx.lineTo(FIELD.w / 2, FIELD.h);
     ctx.stroke();
 
-    if (p.flash > 0) {
-      ctx.globalAlpha =
-        p.flash;
+    const goalTop = FIELD.h / 2 - FIELD.goalHeight / 2;
+    ctx.strokeStyle = '#43d9ff';
+    ctx.strokeRect(0, goalTop, FIELD.goalDepth, FIELD.goalHeight);
+    ctx.strokeStyle = '#ff9d2e';
+    ctx.strokeRect(FIELD.w - FIELD.goalDepth, goalTop, FIELD.goalDepth, FIELD.goalHeight);
 
-      ctx.strokeStyle =
-        "#fff";
-
-      ctx.lineWidth = 4;
-
-      ctx.beginPath();
-
-      ctx.arc(
-        0,
-        0,
-        32 +
-          (1 - p.flash) *
-          18,
-        0,
-        Math.PI * 2
-      );
-
-      ctx.stroke();
-    }
-
-    ctx.restore();
+    world.cars.forEach(car => drawCar(car));
+    drawBall(world.ball);
   }
 
-  drawParticles(
-    boostParticles
-  );
-}
-
-function drawParticles(list) {
-  for (const p of list) {
+  function drawCar(car) {
     ctx.save();
-
-    ctx.globalAlpha =
-      Math.max(
-        0,
-        Math.min(
-          1,
-          p.life
-        )
-      );
-
-    ctx.fillStyle =
-      p.color;
-
-    ctx.shadowColor =
-      p.color;
-
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+    ctx.fillStyle = car.team === 'blue' ? '#43d9ff' : '#ff9d2e';
+    ctx.shadowColor = ctx.fillStyle;
     ctx.shadowBlur = 12;
+    ctx.fillRect(-CAR_CFG.width / 2, -CAR_CFG.height / 2, CAR_CFG.width, CAR_CFG.height);
+    ctx.restore();
+  }
 
+  function drawBall(ball) {
     ctx.beginPath();
-
-    ctx.arc(
-      p.x,
-      p.y,
-      p.size,
-      0,
-      Math.PI * 2
-    );
-
+    ctx.arc(ball.x, ball.y, BALL_CFG.radius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 10;
     ctx.fill();
-
-    ctx.restore();
-  }
-}
-
-function drawGoalEffects() {
-  drawParticles(
-    goalParticles
-  );
-
-  if (goalFlash > 0) {
-    ctx.save();
-
-    ctx.globalAlpha =
-      goalFlash * 0.12;
-
-    ctx.fillStyle =
-      "#fff";
-
-    ctx.fillRect(
-      0,
-      0,
-      W,
-      H
-    );
-
-    ctx.restore();
-  }
-}
-
-function updateHUD() {
-  if (boostFill) {
-    boostFill.style.width =
-      `${player.boost}%`;
+    ctx.shadowBlur = 0;
   }
 
-  setText(
-    boostNumber,
-    Math.floor(
-      player.boost
-    )
-  );
+  /* =====================================================
+     HUD
+  ===================================================== */
 
-  const s =
-    Math.abs(
-      player.speed
-    );
+  function updateHud() {
+    const myCar = world.cars[myPlayerNumber === 2 ? 1 : 0];
+    $('boostFill').style.width = myCar.boost + '%';
+    $('boostNumber').textContent = Math.round(myCar.boost);
+    $('speedNumber').textContent = Math.round((myCar.speed || 0) * 20);
+  }
 
-  const kmh =
-    player.boosting
-      ? Math.round(
-          Math.min(
-            83,
-            s * (83 / 11.7)
-          )
-        )
-      : Math.round(
-          Math.min(
-            51,
-            s * (51 / 7.2)
-          )
-        );
+  function updateScoreDisplay() {
+    $('blueScore').textContent = world.scoreBlue;
+    $('orangeScore').textContent = world.scoreOrange;
+  }
 
-  setText(
-    speedNumber,
-    kmh
-  );
-}
+  function updateTimerDisplay() {
+    const m = Math.floor(matchTimeLeft / 60);
+    const s = matchTimeLeft % 60;
+    $('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }
 
-function roundRect(
-  x,
-  y,
-  w,
-  h,
-  r
-) {
-  ctx.beginPath();
+  /* =====================================================
+     PAUSE
+  ===================================================== */
 
-  ctx.moveTo(
-    x + r,
-    y
-  );
+  function togglePause() {
+    paused = !paused;
+    if (paused) show($('pauseMenu')); else hide($('pauseMenu'));
+  }
 
-  ctx.lineTo(
-    x + w - r,
-    y
-  );
+  function initPauseMenu() {
+    $('resumeButton').onclick = () => { paused = false; hide($('pauseMenu')); };
+    $('pauseSettingsButton').onclick = () => { hide($('pauseMenu')); show($('settingsMenu')); };
+    $('concedeButton').onclick = () => { hide($('pauseMenu')); show($('concedeConfirm')); };
+    $('pauseMainMenuButton').onclick = () => { returnToMainMenu(); };
 
-  ctx.quadraticCurveTo(
-    x + w,
-    y,
-    x + w,
-    y + r
-  );
+    $('confirmConcedeButton').onclick = () => {
+      hide($('concedeConfirm'));
+      const winner = myPlayerNumber === 1 ? 'orange' : 'blue';
+      endMatch(winner);
+    };
+    $('cancelConcedeButton').onclick = () => {
+      hide($('concedeConfirm'));
+      show($('pauseMenu'));
+    };
+  }
 
-  ctx.lineTo(
-    x + w,
-    y + h - r
-  );
+  /* =====================================================
+     FIN DE MATCH
+  ===================================================== */
 
-  ctx.quadraticCurveTo(
-    x + w,
-    y + h,
-    x + w - r,
-    y + h
-  );
+  function endMatch() {
+    stopGameLoop();
+    showResult(null, world.scoreBlue, world.scoreOrange);
+  }
 
-  ctx.lineTo(
-    x + r,
-    y + h
-  );
+  function showResult(reason, scoreBlue, scoreOrange) {
+    let winnerText;
+    if (scoreBlue > scoreOrange) winnerText = 'BLUE WINS';
+    else if (scoreOrange > scoreBlue) winnerText = 'ORANGE WINS';
+    else winnerText = 'DRAW';
 
-  ctx.quadraticCurveTo(
-    x,
-    y + h,
-    x,
-    y + h - r
-  );
+    $('winnerDisplay').textContent = reason || winnerText;
+    $('finalBlueScore').textContent = scoreBlue;
+    $('finalOrangeScore').textContent = scoreOrange;
+    show($('resultScreen'));
+  }
 
-  ctx.lineTo(
-    x,
-    y + r
-  );
+  function initResultScreen() {
+    $('playAgainButton').onclick = () => {
+      hide($('resultScreen'));
+      startMatch(mode);
+    };
+    $('mainMenuButton').onclick = () => {
+      hide($('resultScreen'));
+      returnToMainMenu();
+    };
+  }
 
-  ctx.quadraticCurveTo(
-    x,
-    y,
-    x + r,
-    y
-  );
+  function returnToMainMenu() {
+    stopGameLoop();
+    if (ws) { ws.close(); ws = null; }
+    hide($('pauseMenu'));
+    hide($('resultScreen'));
+    const mc = $('mobileControls');
+    if (mc) mc.remove();
+    show($('mainMenu'));
+  }
 
-  ctx.closePath();
-}
+  /* =====================================================
+     HOW TO PLAY (existant dans le HTML)
+  ===================================================== */
 
-function gameLoop(now) {
-  const dt =
-    Math.min(
-      now - lastTime,
-      100
-    );
-
-  lastTime = now;
-
-  updateEffects(dt);
-  updateBoostPads(dt);
-
-  if (
-    gameRunning &&
-    !paused &&
-    !goalActive
-  ) {
-    player.update();
-    bot.update();
-    ball.update();
-
-    if (!goalActive) {
-      carBallCollision(player);
-
-      carBallCollision(bot);
-
-      carCarCollision(
-        player,
-        bot
-      );
-
-      updateTimer(dt);
+  function initHowToPlay() {
+    $('howToPlayButton') && ($('howToPlayButton').onclick = () => {});
+    if ($('backButton')) {
+      $('backButton').onclick = () => {
+        hide($('howToPlayMenu'));
+        show($('mainMenu'));
+      };
     }
   }
 
-  drawArena();
+  /* =====================================================
+     INITIALISATION
+  ===================================================== */
 
-  ball.draw();
+  function init() {
+    loadControls();
+    injectDynamicStyles();
+    hide($('mainMenu'));
+    buildShopMenu();
+    buildSearchingOverlay();
+    initSettingsMenu();
+    initPauseMenu();
+    initResultScreen();
+    initHowToPlay();
+    buildDeviceMenu();
+  }
 
-  player.draw();
-  bot.draw();
-
-  drawGoalEffects();
-
-  updateHUD();
-
-  requestAnimationFrame(
-    gameLoop
-  );
-}
-
-updateControlUI();
-resetPoints();
-updateTimerDisplay();
-
-drawArena();
-
-ball.draw();
-player.draw();
-bot.draw();
-
-updateHUD();
-
-requestAnimationFrame(
-  gameLoop
-);
+  document.addEventListener('DOMContentLoaded', init);
+})();
