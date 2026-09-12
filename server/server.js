@@ -241,3 +241,10 @@ httpServer.listen(PORT, "0.0.0.0", () => {
     `Rocket League.io server listening on port ${PORT}`
   );
 });
+if (data.type === "admin-stats") {
+  send(player, {
+    type: "admin-stats",
+    matchCount: matches.size
+  });
+  return;
+}
