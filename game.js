@@ -81,14 +81,14 @@
   const POINTS_GOAL = 150;
   const POINTS_SAVE = 50;
 
-  const MOVE_DRAG_THRESHOLD = 16; // px avant que le glissement soit pris en compte
+  const MOVE_MAX_DRAG = 100; // px de glissement pour atteindre 100% de l'input
 
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
 
   let deviceType = null;
-  let mode = null;
+  let mode = null; // 'online' | 'offline' | 'freeplay'
   let ws = null;
   let myPlayerNumber = null;
   let isHost = false;
@@ -103,10 +103,12 @@
   };
 
   const keysDown = {};
-  const touchInput = { forward: false, backward: false, left: false, right: false, boost: false };
+  const touchInput = { throttle: 0, steer: 0, boost: false };
 
   let rebindingAction = null;
   let settingsOpenedFrom = 'mainMenu';
+
+  let cheatInfiniteBoost = false;
 
   let canvas, ctx;
   let running = false;
@@ -118,7 +120,6 @@
 
   let world = null;
 
-  // Etat du pavé tactile de déplacement (mobile)
   let moveTouchId = null;
   let moveStartX = 0;
   let moveStartY = 0;
@@ -142,6 +143,8 @@
 
   function show(el) { el.classList.remove('hidden'); }
   function hide(el) { el.classList.add('hidden'); }
+
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
   function teamOfPlayer(num) { return num === 1 ? 'blue' : 'orange'; }
 
@@ -254,6 +257,26 @@
         background: #00bfff;
         box-shadow: 0 0 25px #00bfff;
       }
+
+      #cheatSettingsMenu .cheat-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 16px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+      }
+      #cheatSettingsMenu .cheat-row span {
+        font-size: 12px;
+        letter-spacing: 1px;
+        color: #dce8f2;
+      }
+      #cheatSettingsMenu input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+        accent-color: #00bfff;
+        cursor: pointer;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -344,6 +367,7 @@
         <div class="menu-column-right">
           <button id="play1v1OnlineBtn" class="main-button">1V1 EN LIGNE</button>
           <button id="play1v1OfflineBtn" class="main-button">1V1 HORS LIGNE</button>
+          <button id="playFreeplayBtn" class="main-button">JEU LIBRE</button>
         </div>
       </div>
 
@@ -356,6 +380,7 @@
     $('openShopBtn').onclick = openShop;
     $('play1v1OnlineBtn').onclick = () => startMatch('online');
     $('play1v1OfflineBtn').onclick = () => startMatch('offline');
+    $('playFreeplayBtn').onclick = () => startMatch('freeplay');
   }
 
   /* =====================================================
@@ -458,6 +483,42 @@
   }
 
   /* =====================================================
+     SETTINGS TRICHE (uniquement Free Play)
+  ===================================================== */
+
+  function buildCheatSettingsMenu() {
+    const div = document.createElement('div');
+    div.id = 'cheatSettingsMenu';
+    div.className = 'menu-screen hidden';
+    div.innerHTML = `
+      <div class="panel">
+        <h2>SETTINGS TRICHE</h2>
+        <div class="cheat-row">
+          <span>BOOST ILLIMITÉ</span>
+          <input type="checkbox" id="cheatInfiniteBoostCheckbox">
+        </div>
+        <button id="cheatSettingsBackButton" class="secondary-button" style="margin-top:25px;">BACK</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    $('cheatInfiniteBoostCheckbox').addEventListener('change', (e) => {
+      cheatInfiniteBoost = e.target.checked;
+    });
+
+    $('cheatSettingsBackButton').onclick = () => {
+      hide($('cheatSettingsMenu'));
+      show($('pauseMenu'));
+    };
+  }
+
+  function openCheatSettings() {
+    hide($('pauseMenu'));
+    $('cheatInfiniteBoostCheckbox').checked = cheatInfiniteBoost;
+    show($('cheatSettingsMenu'));
+  }
+
+  /* =====================================================
      RECHERCHE DE MATCH
   ===================================================== */
 
@@ -492,7 +553,7 @@
     mode = chosenMode;
     hide($('mainMenu'));
 
-    if (mode === 'offline') {
+    if (mode === 'offline' || mode === 'freeplay') {
       isHost = true;
       myPlayerNumber = 1;
       launchMatchIntro();
@@ -528,7 +589,7 @@
         break;
 
       case 'opponent-input':
-        if (isHost && world) {
+        if (isHost && world && world.cars[1]) {
           world.cars[1]._pendingInput = data.input;
         }
         break;
@@ -553,6 +614,12 @@
   ===================================================== */
 
   function launchMatchIntro() {
+    if (mode === 'freeplay') {
+      setupWorld();
+      runCountdown(3, () => { beginPlay(); });
+      return;
+    }
+
     show($('matchIntro'));
     setTimeout(() => {
       hide($('matchIntro'));
@@ -595,11 +662,13 @@
     canvas = $('gameCanvas');
     ctx = canvas.getContext('2d');
 
+    const cars = [makeCar(FIELD.w * 0.25, FIELD.h / 2, 0, 'blue')];
+    if (mode !== 'freeplay') {
+      cars.push(makeCar(FIELD.w * 0.75, FIELD.h / 2, Math.PI, 'orange'));
+    }
+
     world = {
-      cars: [
-        makeCar(FIELD.w * 0.25, FIELD.h / 2, 0, 'blue'),
-        makeCar(FIELD.w * 0.75, FIELD.h / 2, Math.PI, 'orange')
-      ],
+      cars,
       ball: { x: FIELD.w / 2, y: FIELD.h / 2, vx: 0, vy: 0 },
       scoreBlue: 0,
       scoreOrange: 0,
@@ -638,17 +707,31 @@
   });
 
   function readLocalInput() {
+    if (deviceType === 'mobile') {
+      return {
+        throttle: touchInput.throttle,
+        steer: touchInput.steer,
+        boost: touchInput.boost
+      };
+    }
+
+    let throttle = 0;
+    if (keysDown[controls.forward]) throttle += 1;
+    if (keysDown[controls.backward]) throttle -= 1;
+
+    let steer = 0;
+    if (keysDown[controls.left]) steer -= 1;
+    if (keysDown[controls.right]) steer += 1;
+
     return {
-      forward: !!keysDown[controls.forward] || touchInput.forward,
-      backward: !!keysDown[controls.backward] || touchInput.backward,
-      left: !!keysDown[controls.left] || touchInput.left,
-      right: !!keysDown[controls.right] || touchInput.right,
-      boost: !!keysDown[controls.boost] || touchInput.boost
+      throttle,
+      steer,
+      boost: !!keysDown[controls.boost]
     };
   }
 
   /* =====================================================
-     CONTROLES MOBILES : pavé tactile invisible
+     CONTROLES MOBILES : pavé tactile invisible analogique
   ===================================================== */
 
   function buildMobileControls() {
@@ -665,20 +748,22 @@
     const boostBtn = $('mcBoost');
 
     function resetMoveInput() {
-      touchInput.forward = false;
-      touchInput.backward = false;
-      touchInput.left = false;
-      touchInput.right = false;
+      touchInput.throttle = 0;
+      touchInput.steer = 0;
     }
 
+    // Le glissement du doigt est traité comme un joystick analogique :
+    // - glisser à gauche  -> avance (throttle positif), proportionnel à la distance
+    // - glisser à droite  -> recule (throttle négatif)
+    // - glisser vers le haut   -> tourne à gauche (steer négatif)
+    // - glisser vers le bas    -> tourne à droite (steer positif)
+    // La force appliquée dépend toujours de l'angle actuel de la voiture
+    // (gérée dans updateCar), donc ça s'adapte automatiquement à son orientation.
     function updateMoveFromDelta(dx, dy) {
-      touchInput.forward = dx < -MOVE_DRAG_THRESHOLD;
-      touchInput.backward = dx > MOVE_DRAG_THRESHOLD;
-      touchInput.left = dy < -MOVE_DRAG_THRESHOLD;
-      touchInput.right = dy > MOVE_DRAG_THRESHOLD;
+      touchInput.throttle = clamp(-dx / MOVE_MAX_DRAG, -1, 1);
+      touchInput.steer = clamp(dy / MOVE_MAX_DRAG, -1, 1);
     }
 
-    // --- Support tactile (mobile réel) ---
     moveArea.addEventListener('touchstart', (e) => {
       if (moveTouchId !== null) return;
       const t = e.changedTouches[0];
@@ -709,7 +794,7 @@
     moveArea.addEventListener('touchend', endMoveTouch, { passive: false });
     moveArea.addEventListener('touchcancel', endMoveTouch, { passive: false });
 
-    // --- Fallback souris (test sur navigateur desktop) ---
+    // Fallback souris (tests sur navigateur desktop)
     let mouseDragging = false;
     moveArea.addEventListener('mousedown', (e) => {
       mouseDragging = true;
@@ -726,7 +811,6 @@
       resetMoveInput();
     });
 
-    // --- Bouton boost ---
     const setBoost = (v) => {
       touchInput.boost = v;
       boostBtn.classList.toggle('active', v);
@@ -756,15 +840,23 @@
       return;
     }
 
+    const infiniteBoost = mode === 'freeplay' && cheatInfiniteBoost;
+    if (infiniteBoost) car.boost = 100;
+
     const boosting = input.boost && car.boost > 0;
     const maxSpeed = boosting ? CAR_CFG.maxSpeedBoost : CAR_CFG.maxSpeed;
 
-    if (input.left) car.angle -= CAR_CFG.turnSpeed * dt * 60;
-    if (input.right) car.angle += CAR_CFG.turnSpeed * dt * 60;
+    const steer = clamp(input.steer, -1, 1);
+    const throttle = clamp(input.throttle, -1, 1);
+
+    car.angle += steer * CAR_CFG.turnSpeed * dt * 60;
 
     let thrust = 0;
-    if (input.forward) thrust = CAR_CFG.accel * (boosting ? CAR_CFG.boostThrustMult : 1);
-    if (input.backward) thrust = -CAR_CFG.reverseAccel;
+    if (throttle >= 0) {
+      thrust = throttle * CAR_CFG.accel * (boosting ? CAR_CFG.boostThrustMult : 1);
+    } else {
+      thrust = throttle * CAR_CFG.reverseAccel;
+    }
 
     car.vx += Math.cos(car.angle) * thrust * dt * 60;
     car.vy += Math.sin(car.angle) * thrust * dt * 60;
@@ -785,7 +877,7 @@
     car.x = Math.max(CAR_CFG.width / 2, Math.min(FIELD.w - CAR_CFG.width / 2, car.x));
     car.y = Math.max(CAR_CFG.height / 2, Math.min(FIELD.h - CAR_CFG.height / 2, car.y));
 
-    if (boosting) {
+    if (boosting && !infiniteBoost) {
       car.boost = Math.max(0, car.boost - CAR_CFG.boostDrain * dt);
     } else if (CAR_CFG.boostRegen > 0) {
       car.boost = Math.min(100, car.boost + CAR_CFG.boostRegen * dt);
@@ -1077,10 +1169,8 @@
     while (diff < -Math.PI) diff += Math.PI * 2;
 
     return {
-      forward: true,
-      backward: false,
-      left: diff < -0.05,
-      right: diff > 0.05,
+      throttle: 1,
+      steer: clamp(diff / 0.3, -1, 1),
       boost: Math.hypot(dx, dy) > 300
     };
   }
@@ -1113,19 +1203,21 @@
           const myInput = readLocalInput();
           updateCar(world.cars[0], myInput, dt);
 
-          let p2Input;
-          if (mode === 'offline') {
-            p2Input = botInput(world.cars[1], world.ball);
-          } else {
-            p2Input = world.cars[1]._pendingInput || { forward: false, backward: false, left: false, right: false, boost: false };
+          if (world.cars[1]) {
+            let p2Input;
+            if (mode === 'offline') {
+              p2Input = botInput(world.cars[1], world.ball);
+            } else {
+              p2Input = world.cars[1]._pendingInput || { throttle: 0, steer: 0, boost: false };
+            }
+            updateCar(world.cars[1], p2Input, dt);
           }
-          updateCar(world.cars[1], p2Input, dt);
 
           if (!world.frozen) {
             simulateBall(world.ball, dt);
-            checkCarCollision(world.cars[0], world.cars[1]);
+            if (world.cars[1]) checkCarCollision(world.cars[0], world.cars[1]);
             carBallCollision(world.cars[0], world.ball);
-            carBallCollision(world.cars[1], world.ball);
+            if (world.cars[1]) carBallCollision(world.cars[1], world.ball);
             checkGoal();
           }
 
@@ -1370,21 +1462,40 @@
   }
 
   function updatePauseMenuForMode() {
-    const btn = $('pauseMainMenuButton');
-    if (!btn) return;
+    const concedeBtn = $('concedeButton');
+    const mainMenuBtn = $('pauseMainMenuButton');
+    const cheatBtn = $('cheatSettingsMenuButton');
+
     if (mode === 'online') {
-      hide(btn);
+      show(concedeBtn);
+      hide(mainMenuBtn);
+      hide(cheatBtn);
+    } else if (mode === 'freeplay') {
+      hide(concedeBtn);
+      show(mainMenuBtn);
+      show(cheatBtn);
     } else {
-      show(btn);
+      // offline (1v1 vs bot)
+      show(concedeBtn);
+      show(mainMenuBtn);
+      hide(cheatBtn);
     }
   }
 
   function initPauseMenu() {
+    // Bouton "SETTINGS TRICHE" injecté juste après le bouton concède
+    const cheatBtn = document.createElement('button');
+    cheatBtn.id = 'cheatSettingsMenuButton';
+    cheatBtn.className = 'hidden';
+    cheatBtn.textContent = 'SETTINGS TRICHE';
+    $('concedeButton').insertAdjacentElement('afterend', cheatBtn);
+    cheatBtn.onclick = openCheatSettings;
+
     $('resumeButton').onclick = () => { paused = false; hide($('pauseMenu')); };
     $('pauseSettingsButton').onclick = () => openSettings('pauseMenu');
     $('concedeButton').onclick = () => { hide($('pauseMenu')); show($('concedeConfirm')); };
     $('pauseMainMenuButton').onclick = () => {
-      if (mode === 'online') return; // sécurité : impossible en ligne
+      if (mode === 'online') return;
       returnToMainMenu();
     };
 
@@ -1465,6 +1576,7 @@
     injectStatsBar();
     hide($('mainMenu'));
     buildShopMenu();
+    buildCheatSettingsMenu();
     buildSearchingOverlay();
     initSettingsMenu();
     initPauseMenu();
