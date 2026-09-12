@@ -1,12 +1,12 @@
-/* =========================================================
-   TURBOKICK.IO
-   Main Game Script
-   ========================================================= */
-
 "use strict";
 
 /* =========================================================
-   CONFIGURATION
+   TURBOKICK.IO - GAME.JS
+   Jeu 2D
+========================================================= */
+
+/* =========================================================
+   CONFIG
 ========================================================= */
 
 const GAME_NAME = "TurboKick.io";
@@ -19,74 +19,40 @@ const MATCH_DURATION = 120;
 const PLAYER_MAX_SPEED = 7.2;
 const BOT_MAX_SPEED = 6.2;
 
-const PLAYER_ACCELERATION = 0.35;
-const PLAYER_FRICTION = 0.90;
+const PLAYER_ACCELERATION = 0.32;
+const PLAYER_FRICTION = 0.91;
 
 const BOOST_MAX = 100;
-const BOOST_USE_SPEED = 0.75;
-const BOOST_RECHARGE = 0.20;
+const BOOST_USE_SPEED = 0.72;
+const BOOST_RECHARGE = 0.18;
 
 const BALL_RADIUS = 16;
 const PLAYER_RADIUS = 28;
 
-const MAX_BALL_SPEED = 9;
+const MAX_BALL_SPEED = 13;
 
-const GOAL_TOP = 230;
-const GOAL_BOTTOM = 470;
-const GOAL_DEPTH = 70;
+const FIELD_LEFT = 25;
+const FIELD_RIGHT = CANVAS_WIDTH - 25;
+const FIELD_TOP = 25;
+const FIELD_BOTTOM = CANVAS_HEIGHT - 25;
 
-/* Serveur WebSocket */
+const GOAL_TOP = 220;
+const GOAL_BOTTOM = 480;
+const GOAL_DEPTH = 80;
+
+const GOAL_POST_RADIUS = 8;
+
+const BOOST_PAD_RADIUS = 19;
+const BOOST_PAD_AMOUNT = 100;
+const BOOST_PAD_RESPAWN = 5000;
+
+/* Serveur Render */
 
 const SERVER_URL = "wss://kyro-io.onrender.com";
 
-/* Boost pads */
-
-const BOOST_PAD_AMOUNT = 100;
-const BOOST_PAD_RESPAWN_TIME = 5000;
-
-const BOOST_PADS = [
-  {
-    x: 110,
-    y: 110,
-    active: true,
-    respawnAt: 0
-  },
-  {
-    x: 110,
-    y: CANVAS_HEIGHT - 110,
-    active: true,
-    respawnAt: 0
-  },
-  {
-    x: CANVAS_WIDTH - 110,
-    y: 110,
-    active: true,
-    respawnAt: 0
-  },
-  {
-    x: CANVAS_WIDTH - 110,
-    y: CANVAS_HEIGHT - 110,
-    active: true,
-    respawnAt: 0
-  },
-  {
-    x: CANVAS_WIDTH / 2,
-    y: 75,
-    active: true,
-    respawnAt: 0
-  },
-  {
-    x: CANVAS_WIDTH / 2,
-    y: CANVAS_HEIGHT - 75,
-    active: true,
-    respawnAt: 0
-  }
-];
-
-/* Zones de save invisibles */
-
-const SAVE_ZONE_WIDTH = 95;
-const SAVE_ZONE_HEIGHT = GOAL_BOTTOM - GOAL_TOP + 70;
+/* =========================================================
+   CONTROLS
+========================================================= */
 
 const DEFAULT_CONTROLS = {
   forward: "z",
@@ -107,7 +73,6 @@ const gameState = {
 
   running: false,
   paused: false,
-
   countdown: false,
 
   timeRemaining: MATCH_DURATION,
@@ -116,6 +81,8 @@ const gameState = {
   orangeScore: 0,
 
   playerPoints: 0,
+  bluePoints: 0,
+  orangePoints: 0,
 
   blueGoals: 0,
   orangeGoals: 0,
@@ -137,36 +104,54 @@ const gameState = {
   matchId: null,
   isHost: false,
 
-  opponent: null,
-
   websocket: null,
-
-  lastFrame: 0,
 
   goalInProgress: false,
 
-  matchMode: "offline",
+  lastFrame: 0,
 
-  lastBallTouchBy: null,
+  lastStateSent: 0,
 
-  lastSaveBy: null
+  lastPointTime: {
+    blue: 0,
+    orange: 0
+  },
+
+  saveCooldown: {
+    blue: 0,
+    orange: 0
+  }
 };
 
 /* =========================================================
    DOM
 ========================================================= */
 
-const gameWrapper = document.getElementById("gameWrapper");
+const gameWrapper =
+  document.getElementById("gameWrapper");
 
-const mainMenu = document.getElementById("mainMenu");
-const howToPlayMenu = document.getElementById("howToPlayMenu");
-const settingsMenu = document.getElementById("settingsMenu");
+const mainMenu =
+  document.getElementById("mainMenu");
 
-const matchIntro = document.getElementById("matchIntro");
-const resultScreen = document.getElementById("resultScreen");
+const howToPlayMenu =
+  document.getElementById("howToPlayMenu");
 
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas ? canvas.getContext("2d") : null;
+const settingsMenu =
+  document.getElementById("settingsMenu");
+
+const matchIntro =
+  document.getElementById("matchIntro");
+
+const resultScreen =
+  document.getElementById("resultScreen");
+
+const canvas =
+  document.getElementById("gameCanvas");
+
+const ctx =
+  canvas
+    ? canvas.getContext("2d")
+    : null;
 
 const playerPointsElement =
   document.getElementById("playerPoints");
@@ -211,7 +196,7 @@ const finalScore =
   document.getElementById("finalScore");
 
 /* =========================================================
-   GAME OBJECTS
+   PLAYERS
 ========================================================= */
 
 const player = {
@@ -264,20 +249,78 @@ const bot = {
   team: "orange"
 };
 
+/* =========================================================
+   BALL
+========================================================= */
+
 const ball = {
   x: CANVAS_WIDTH / 2,
   y: CANVAS_HEIGHT / 2,
 
   vx: 0,
-  vy: 0
+  vy: 0,
+
+  lastTouchTeam: null,
+  lastTouchTime: 0
 };
 
 /* =========================================================
-   UTILITIES
+   6 BOOST PADS
+========================================================= */
+
+const boostPads = [
+  {
+    x: 135,
+    y: 135,
+    active: true,
+    respawnAt: 0
+  },
+
+  {
+    x: 135,
+    y: CANVAS_HEIGHT - 135,
+    active: true,
+    respawnAt: 0
+  },
+
+  {
+    x: CANVAS_WIDTH - 135,
+    y: 135,
+    active: true,
+    respawnAt: 0
+  },
+
+  {
+    x: CANVAS_WIDTH - 135,
+    y: CANVAS_HEIGHT - 135,
+    active: true,
+    respawnAt: 0
+  },
+
+  {
+    x: CANVAS_WIDTH / 2,
+    y: 85,
+    active: true,
+    respawnAt: 0
+  },
+
+  {
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT - 85,
+    active: true,
+    respawnAt: 0
+  }
+];
+
+/* =========================================================
+   UTILS
 ========================================================= */
 
 function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+  return Math.max(
+    min,
+    Math.min(max, value)
+  );
 }
 
 function distance(a, b) {
@@ -288,12 +331,18 @@ function distance(a, b) {
 }
 
 function normalizeKey(key) {
-  if (key === " ") return " ";
+  if (key === " ") {
+    return " ";
+  }
+
   return key.toLowerCase();
 }
 
 function formatTime(seconds) {
-  seconds = Math.max(0, Math.ceil(seconds));
+  seconds = Math.max(
+    0,
+    Math.ceil(seconds)
+  );
 
   const minutes =
     Math.floor(seconds / 60);
@@ -323,7 +372,7 @@ function hide(element) {
 }
 
 /* =========================================================
-   NAME
+   GAME NAME
 ========================================================= */
 
 function updateGameName() {
@@ -337,11 +386,10 @@ function updateGameName() {
           .toUpperCase()
           .includes("TURBOBALL")
       ) {
-        if (element.classList.contains("logo-io")) {
-          element.textContent = "TURBOKICK.IO";
-        } else {
-          element.textContent = "TurboKick.io";
-        }
+        element.textContent =
+          element.classList.contains("logo-io")
+            ? "TURBOKICK.IO"
+            : "TurboKick.io";
       }
     });
 }
@@ -351,7 +399,8 @@ function updateGameName() {
 ========================================================= */
 
 function createDeviceMenu() {
-  const menu = document.createElement("div");
+  const menu =
+    document.createElement("div");
 
   menu.id = "deviceMenu";
   menu.className = "menu-screen";
@@ -362,7 +411,10 @@ function createDeviceMenu() {
     <div class="menu-content">
 
       <div class="logo">
-        <div class="logo-small">WELCOME TO</div>
+
+        <div class="logo-small">
+          WELCOME TO
+        </div>
 
         <h1>
           TURBO<span>KICK</span>
@@ -371,13 +423,17 @@ function createDeviceMenu() {
         <div class="logo-io">
           .IO
         </div>
+
       </div>
 
       <div class="menu-footer">
         CHOOSE YOUR DEVICE
       </div>
 
-      <div class="menu-buttons" style="margin-top:25px">
+      <div
+        class="menu-buttons"
+        style="margin-top:25px"
+      >
 
         <button
           id="pcDeviceButton"
@@ -400,22 +456,26 @@ function createDeviceMenu() {
 
   document
     .getElementById("pcDeviceButton")
-    .addEventListener("click", () => {
-      chooseDevice("pc");
-    });
+    .addEventListener(
+      "click",
+      () => chooseDevice("pc")
+    );
 
   document
     .getElementById("mobileDeviceButton")
-    .addEventListener("click", () => {
-      chooseDevice("mobile");
-    });
+    .addEventListener(
+      "click",
+      () => chooseDevice("mobile")
+    );
 }
 
 function chooseDevice(device) {
   gameState.device = device;
 
   const deviceMenu =
-    document.getElementById("deviceMenu");
+    document.getElementById(
+      "deviceMenu"
+    );
 
   hide(deviceMenu);
 
@@ -429,7 +489,8 @@ function chooseDevice(device) {
 function buildMainMenu() {
   if (!mainMenu) return;
 
-  mainMenu.className = "menu-screen";
+  mainMenu.className =
+    "menu-screen";
 
   mainMenu.innerHTML = `
     <div class="menu-background"></div>
@@ -467,14 +528,19 @@ function buildMainMenu() {
           <button
             id="settingsButtonNew"
             class="secondary-button"
-            style="width:100%;margin-bottom:12px">
+            style="
+              width:100%;
+              margin-bottom:12px;
+            "
+          >
             ⚙ SETTINGS
           </button>
 
           <button
             id="shopButton"
             class="secondary-button"
-            style="width:100%">
+            style="width:100%"
+          >
             🛒 SHOP
           </button>
 
@@ -485,14 +551,19 @@ function buildMainMenu() {
           <button
             id="onlineButton"
             class="main-button"
-            style="width:100%;margin-bottom:12px">
+            style="
+              width:100%;
+              margin-bottom:12px;
+            "
+          >
             🌐 1V1 ONLINE
           </button>
 
           <button
             id="offlineButton"
             class="secondary-button"
-            style="width:100%">
+            style="width:100%"
+          >
             🤖 1V1 OFFLINE
           </button>
 
@@ -501,7 +572,9 @@ function buildMainMenu() {
       </div>
 
       <div class="menu-footer">
-        ${gameState.device.toUpperCase()} MODE
+        ${String(
+          gameState.device || "PC"
+        ).toUpperCase()} MODE
       </div>
 
     </div>
@@ -511,19 +584,31 @@ function buildMainMenu() {
 
   document
     .getElementById("settingsButtonNew")
-    .addEventListener("click", openSettings);
+    .addEventListener(
+      "click",
+      openSettings
+    );
 
   document
     .getElementById("shopButton")
-    .addEventListener("click", openShop);
+    .addEventListener(
+      "click",
+      openShop
+    );
 
   document
     .getElementById("onlineButton")
-    .addEventListener("click", startOnlineSearch);
+    .addEventListener(
+      "click",
+      startOnlineSearch
+    );
 
   document
     .getElementById("offlineButton")
-    .addEventListener("click", startOfflineMatch);
+    .addEventListener(
+      "click",
+      startOfflineMatch
+    );
 }
 
 /* =========================================================
@@ -533,14 +618,17 @@ function buildMainMenu() {
 function openShop() {
   hide(mainMenu);
 
-  const existing =
-    document.getElementById("shopMenu");
+  const oldShop =
+    document.getElementById(
+      "shopMenu"
+    );
 
-  if (existing) {
-    existing.remove();
+  if (oldShop) {
+    oldShop.remove();
   }
 
-  const shop = document.createElement("div");
+  const shop =
+    document.createElement("div");
 
   shop.id = "shopMenu";
   shop.className = "menu-screen";
@@ -564,7 +652,8 @@ function openShop() {
 
       <button
         id="shopBackButton"
-        class="secondary-button">
+        class="secondary-button"
+      >
         BACK
       </button>
 
@@ -575,10 +664,13 @@ function openShop() {
 
   document
     .getElementById("shopBackButton")
-    .addEventListener("click", () => {
-      shop.remove();
-      show(mainMenu);
-    });
+    .addEventListener(
+      "click",
+      () => {
+        shop.remove();
+        show(mainMenu);
+      }
+    );
 }
 
 /* =========================================================
@@ -600,7 +692,7 @@ function closeSettings() {
 }
 
 function updateSettingsButtons() {
-  const map = {
+  const ids = {
     forward: "forwardKeyButton",
     reverse: "reverseKeyButton",
     left: "leftKeyButton",
@@ -608,21 +700,23 @@ function updateSettingsButtons() {
     boost: "boostKeyButton"
   };
 
-  Object.keys(map).forEach(action => {
+  Object.keys(ids).forEach(action => {
     const button =
-      document.getElementById(map[action]);
+      document.getElementById(
+        ids[action]
+      );
 
     if (!button) return;
 
-    let text =
+    let key =
       gameState.controls[action];
 
-    if (text === " ") {
-      text = "SPACE";
+    if (key === " ") {
+      key = "SPACE";
     }
 
     button.textContent =
-      text.toUpperCase();
+      key.toUpperCase();
   });
 }
 
@@ -631,12 +725,17 @@ function resetControls() {
     ...DEFAULT_CONTROLS
   };
 
+  gameState.currentSetting =
+    null;
+
   updateSettingsButtons();
+  updateHowToPlayKeys();
   updateControlDisplay();
 }
 
 function waitForNewKey(action) {
-  gameState.currentSetting = action;
+  gameState.currentSetting =
+    action;
 
   const ids = {
     forward: "forwardKeyButton",
@@ -647,12 +746,14 @@ function waitForNewKey(action) {
   };
 
   const button =
-    document.getElementById(ids[action]);
+    document.getElementById(
+      ids[action]
+    );
 
   if (!button) return;
 
-  button.classList.add("waiting");
-  button.textContent = "PRESS A KEY...";
+  button.textContent =
+    "PRESS A KEY...";
 }
 
 function handleSettingKey(event) {
@@ -665,12 +766,12 @@ function handleSettingKey(event) {
   const key =
     normalizeKey(event.key);
 
-  if (
-    key === "escape" ||
-    key === "tab"
-  ) {
-    gameState.currentSetting = null;
+  if (key === "escape") {
+    gameState.currentSetting =
+      null;
+
     updateSettingsButtons();
+
     return true;
   }
 
@@ -678,9 +779,11 @@ function handleSettingKey(event) {
     gameState.currentSetting
   ] = key;
 
-  gameState.currentSetting = null;
+  gameState.currentSetting =
+    null;
 
   updateSettingsButtons();
+  updateHowToPlayKeys();
   updateControlDisplay();
 
   return true;
@@ -711,7 +814,9 @@ function updateHowToPlayKeys() {
 
   Object.keys(ids).forEach(action => {
     const element =
-      document.getElementById(ids[action]);
+      document.getElementById(
+        ids[action]
+      );
 
     if (!element) return;
 
@@ -727,50 +832,52 @@ function updateHowToPlayKeys() {
   });
 }
 
-/* =========================================================
-   CONTROL DISPLAY
-========================================================= */
-
 function updateControlDisplay() {
-  const controls = document.querySelectorAll(
-    "#controls b"
-  );
-
-  if (!controls.length) return;
-
   const values = [
     gameState.controls.forward,
     gameState.controls.reverse,
     gameState.controls.left,
     gameState.controls.right,
     gameState.controls.boost,
-    "P"
+    "p"
   ];
 
-  controls.forEach((element, index) => {
-    if (index >= values.length) return;
+  document
+    .querySelectorAll("#controls b")
+    .forEach((element, index) => {
+      if (index >= values.length) {
+        return;
+      }
 
-    let value = values[index];
+      let value = values[index];
 
-    if (value === " ") {
-      value = "SPACE";
-    }
+      if (value === " ") {
+        value = "SPACE";
+      }
 
-    element.textContent =
-      value.toUpperCase();
-  });
+      element.textContent =
+        value.toUpperCase();
+    });
 }
 
 /* =========================================================
-   OFFLINE MATCH
+   OFFLINE
 ========================================================= */
 
 function startOfflineMatch() {
-  gameState.mode = "offline";
-  gameState.matchMode = "offline";
+  closeWebSocket(false);
 
-  player.team = "blue";
-  opponent.team = "orange";
+  gameState.mode =
+    "offline";
+
+  gameState.team =
+    "blue";
+
+  player.team =
+    "blue";
+
+  opponent.team =
+    "orange";
 
   hide(mainMenu);
 
@@ -778,13 +885,14 @@ function startOfflineMatch() {
 
   showMatchIntro();
 
-  setTimeout(() => {
-    startCountdown();
-  }, 900);
+  setTimeout(
+    startCountdown,
+    800
+  );
 }
 
 /* =========================================================
-   ONLINE MATCHMAKING
+   ONLINE
 ========================================================= */
 
 function getWebSocketURL() {
@@ -792,14 +900,13 @@ function getWebSocketURL() {
 }
 
 function startOnlineSearch() {
-  if (gameState.onlineSearching) {
-    return;
-  }
-
-  gameState.mode = "online";
-  gameState.matchMode = "online";
-
   hide(mainMenu);
+
+  gameState.mode =
+    "online";
+
+  gameState.onlineSearching =
+    true;
 
   createSearchScreen();
 
@@ -807,20 +914,22 @@ function startOnlineSearch() {
 }
 
 function createSearchScreen() {
-  const existing =
-    document.getElementById("searchMenu");
+  const old =
+    document.getElementById(
+      "searchMenu"
+    );
 
-  if (existing) {
-    existing.remove();
+  if (old) {
+    old.remove();
   }
 
-  const searchMenu =
+  const search =
     document.createElement("div");
 
-  searchMenu.id = "searchMenu";
-  searchMenu.className = "menu-screen";
+  search.id = "searchMenu";
+  search.className = "menu-screen";
 
-  searchMenu.innerHTML = `
+  search.innerHTML = `
     <div class="menu-background"></div>
 
     <div class="panel">
@@ -840,17 +949,20 @@ function createSearchScreen() {
 
       <button
         id="cancelSearchButton"
-        class="secondary-button">
+        class="secondary-button"
+      >
         CANCEL
       </button>
 
     </div>
   `;
 
-  document.body.appendChild(searchMenu);
+  document.body.appendChild(search);
 
   document
-    .getElementById("cancelSearchButton")
+    .getElementById(
+      "cancelSearchButton"
+    )
     .addEventListener(
       "click",
       cancelOnlineSearch
@@ -858,11 +970,14 @@ function createSearchScreen() {
 }
 
 function updateSearchStatus(text) {
-  const element =
-    document.getElementById("searchStatus");
+  const status =
+    document.getElementById(
+      "searchStatus"
+    );
 
-  if (element) {
-    element.textContent = text;
+  if (status) {
+    status.textContent =
+      text;
   }
 }
 
@@ -874,9 +989,9 @@ function connectWebSocket() {
       new WebSocket(
         getWebSocketURL()
       );
-  } catch (error) {
+  } catch {
     updateSearchStatus(
-      "IMPOSSIBLE DE SE CONNECTER AU SERVEUR"
+      "ERREUR DE CONNEXION"
     );
 
     return;
@@ -885,8 +1000,11 @@ function connectWebSocket() {
   gameState.websocket.addEventListener(
     "open",
     () => {
-      gameState.onlineConnected = true;
-      gameState.onlineSearching = true;
+      gameState.onlineConnected =
+        true;
+
+      gameState.onlineSearching =
+        true;
 
       updateSearchStatus(
         "RECHERCHE D'UN ADVERSAIRE..."
@@ -901,14 +1019,17 @@ function connectWebSocket() {
   gameState.websocket.addEventListener(
     "message",
     event => {
-      handleSocketMessage(event.data);
+      handleSocketMessage(
+        event.data
+      );
     }
   );
 
   gameState.websocket.addEventListener(
     "close",
     () => {
-      gameState.onlineConnected = false;
+      gameState.onlineConnected =
+        false;
 
       if (
         gameState.onlineSearching
@@ -923,7 +1044,8 @@ function connectWebSocket() {
   gameState.websocket.addEventListener(
     "error",
     () => {
-      gameState.onlineConnected = false;
+      gameState.onlineConnected =
+        false;
 
       updateSearchStatus(
         "ERREUR DE CONNEXION"
@@ -951,14 +1073,12 @@ function handleSocketMessage(raw) {
 
   try {
     data =
-      typeof raw === "string"
-        ? JSON.parse(raw)
-        : JSON.parse(
-            new TextDecoder().decode(raw)
-          );
+      JSON.parse(raw);
   } catch {
     return;
   }
+
+  if (!data) return;
 
   switch (data.type) {
     case "connected":
@@ -967,8 +1087,6 @@ function handleSocketMessage(raw) {
       break;
 
     case "searching":
-      gameState.onlineSearching = true;
-
       updateSearchStatus(
         "RECHERCHE D'UN ADVERSAIRE..."
       );
@@ -995,7 +1113,8 @@ function handleSocketMessage(raw) {
       break;
 
     case "search-cancelled":
-      gameState.onlineSearching = false;
+      gameState.onlineSearching =
+        false;
       break;
 
     case "pong":
@@ -1004,8 +1123,11 @@ function handleSocketMessage(raw) {
 }
 
 function handleMatchFound(data) {
-  gameState.onlineSearching = false;
-  gameState.onlineConnected = true;
+  gameState.onlineSearching =
+    false;
+
+  gameState.onlineConnected =
+    true;
 
   gameState.matchId =
     data.matchId;
@@ -1017,56 +1139,65 @@ function handleMatchFound(data) {
     data.team;
 
   gameState.isHost =
-    data.isHost;
+    !!data.isHost;
 
   player.team =
-    data.team || "blue";
+    data.team;
 
   opponent.team =
-    player.team === "blue"
+    data.team === "blue"
       ? "orange"
       : "blue";
 
   resetMatch();
-
-  hide(
-    document.getElementById(
-      "searchMenu"
-    )
-  );
-
-  showMatchIntro();
-
-  setTimeout(() => {
-    startCountdown();
-  }, 900);
-}
-
-function cancelOnlineSearch() {
-  if (gameState.onlineConnected) {
-    sendSocket({
-      type: "cancel-search"
-    });
-  }
-
-  gameState.onlineSearching = false;
-
-  closeWebSocket(true);
 
   const searchMenu =
     document.getElementById(
       "searchMenu"
     );
 
-  if (searchMenu) {
-    searchMenu.remove();
-  }
+  hide(searchMenu);
 
-  show(mainMenu);
+  showMatchIntro();
+
+  setTimeout(
+    startCountdown,
+    800
+  );
 }
 
-function closeWebSocket(sendLeave) {
-  if (!gameState.websocket) {
+function cancelOnlineSearch() {
+  if (
+    gameState.onlineConnected
+  ) {
+    sendSocket({
+      type: "cancel-search"
+    });
+  }
+
+  gameState.onlineSearching =
+    false;
+
+  closeWebSocket(false);
+
+  const search =
+    document.getElementById(
+      "searchMenu"
+    );
+
+  if (search) {
+    search.remove();
+  }
+
+  buildMainMenu();
+}
+
+function closeWebSocket(
+  sendLeave
+) {
+  if (
+    !gameState.websocket
+  ) {
     return;
   }
 
@@ -1080,9 +1211,11 @@ function closeWebSocket(sendLeave) {
     gameState.websocket.close();
   } catch {}
 
-  gameState.websocket = null;
+  gameState.websocket =
+    null;
 
-  gameState.onlineConnected = false;
+  gameState.onlineConnected =
+    false;
 }
 
 /* =========================================================
@@ -1091,7 +1224,8 @@ function closeWebSocket(sendLeave) {
 
 function sendPlayerInput() {
   if (
-    gameState.mode !== "online" ||
+    gameState.mode !==
+      "online" ||
     !gameState.onlineConnected
   ) {
     return;
@@ -1099,6 +1233,7 @@ function sendPlayerInput() {
 
   sendSocket({
     type: "input",
+
     input: {
       forward:
         !!gameState.keys[
@@ -1129,129 +1264,37 @@ function sendPlayerInput() {
 }
 
 function handleOpponentInput(input) {
-  if (!input) return;
-
   opponent.remoteInput =
     input;
 }
 
-function handleRemoteGameState(state) {
-  if (!state) return;
-
-  if (
-    typeof state.ballX === "number"
-  ) {
-    ball.x = state.ballX;
-  }
-
-  if (
-    typeof state.ballY === "number"
-  ) {
-    ball.y = state.ballY;
-  }
-
-  if (
-    typeof state.ballVX === "number"
-  ) {
-    ball.vx = state.ballVX;
-  }
-
-  if (
-    typeof state.ballVY === "number"
-  ) {
-    ball.vy = state.ballVY;
-  }
-
-  if (
-    typeof state.blueScore === "number"
-  ) {
-    gameState.blueScore =
-      state.blueScore;
-  }
-
-  if (
-    typeof state.orangeScore === "number"
-  ) {
-    gameState.orangeScore =
-      state.orangeScore;
-  }
-
-  if (
-    typeof state.timeRemaining === "number"
-  ) {
-    gameState.timeRemaining =
-      state.timeRemaining;
-  }
-
-  if (
-    typeof state.opponentX === "number"
-  ) {
-    opponent.x =
-      state.opponentX;
-  }
-
-  if (
-    typeof state.opponentY === "number"
-  ) {
-    opponent.y =
-      state.opponentY;
-  }
-
-  if (
-    typeof state.opponentVX === "number"
-  ) {
-    opponent.vx =
-      state.opponentVX;
-  }
-
-  if (
-    typeof state.opponentVY === "number"
-  ) {
-    opponent.vy =
-      state.opponentVY;
-  }
-
-  if (
-    typeof state.opponentAngle === "number"
-  ) {
-    opponent.angle =
-      state.opponentAngle;
-  }
-
-  updateHUD();
-}
-
-function handleOpponentLeft() {
-  if (
-    gameState.mode !== "online"
-  ) {
-    return;
-  }
-
-  gameState.running = false;
-
-  closeWebSocket(false);
-
-  showEndScreen(
-    gameState.team === "blue"
-      ? "BLUE WINS"
-      : "ORANGE WINS",
-    "OPPONENT LEFT"
-  );
-}
-
 /* =========================================================
-   AUTHORITATIVE ONLINE STATE
+   ONLINE GAME STATE
 ========================================================= */
 
 function sendGameState() {
   if (
-    gameState.mode !== "online" ||
+    gameState.mode !==
+      "online" ||
     !gameState.isHost ||
     !gameState.onlineConnected
   ) {
     return;
   }
+
+  const now =
+    performance.now();
+
+  if (
+    now -
+      gameState.lastStateSent <
+    50
+  ) {
+    return;
+  }
+
+  gameState.lastStateSent =
+    now;
 
   sendSocket({
     type: "game-state",
@@ -1269,25 +1312,219 @@ function sendGameState() {
       orangeScore:
         gameState.orangeScore,
 
+      bluePoints:
+        gameState.bluePoints,
+
+      orangePoints:
+        gameState.orangePoints,
+
       timeRemaining:
         gameState.timeRemaining,
 
-      opponentX:
-        opponent.x,
+      blueX:
+        player.team === "blue"
+          ? player.x
+          : opponent.x,
 
-      opponentY:
-        opponent.y,
+      blueY:
+        player.team === "blue"
+          ? player.y
+          : opponent.y,
 
-      opponentVX:
-        opponent.vx,
+      blueVX:
+        player.team === "blue"
+          ? player.vx
+          : opponent.vx,
 
-      opponentVY:
-        opponent.vy,
+      blueVY:
+        player.team === "blue"
+          ? player.vy
+          : opponent.vy,
 
-      opponentAngle:
-        opponent.angle
+      blueAngle:
+        player.team === "blue"
+          ? player.angle
+          : opponent.angle,
+
+      orangeX:
+        player.team === "orange"
+          ? player.x
+          : opponent.x,
+
+      orangeY:
+        player.team === "orange"
+          ? player.y
+          : opponent.y,
+
+      orangeVX:
+        player.team === "orange"
+          ? player.vx
+          : opponent.vx,
+
+      orangeVY:
+        player.team === "orange"
+          ? player.vy
+          : opponent.vy,
+
+      orangeAngle:
+        player.team === "orange"
+          ? player.angle
+          : opponent.angle,
+
+      boostPads:
+        boostPads.map(pad => ({
+          active: pad.active,
+          respawnAt: pad.respawnAt
+        }))
     }
   });
+}
+
+function handleRemoteGameState(
+  state
+) {
+  if (!state) return;
+
+  ball.x =
+    Number(state.ballX) ||
+    ball.x;
+
+  ball.y =
+    Number(state.ballY) ||
+    ball.y;
+
+  ball.vx =
+    Number(state.ballVX) ||
+    0;
+
+  ball.vy =
+    Number(state.ballVY) ||
+    0;
+
+  gameState.blueScore =
+    Number(state.blueScore) ||
+    0;
+
+  gameState.orangeScore =
+    Number(state.orangeScore) ||
+    0;
+
+  gameState.bluePoints =
+    Number(state.bluePoints) ||
+    0;
+
+  gameState.orangePoints =
+    Number(state.orangePoints) ||
+    0;
+
+  gameState.timeRemaining =
+    Number(
+      state.timeRemaining
+    );
+
+  if (
+    player.team === "blue"
+  ) {
+    opponent.x =
+      Number(state.orangeX);
+
+    opponent.y =
+      Number(state.orangeY);
+
+    opponent.vx =
+      Number(state.orangeVX);
+
+    opponent.vy =
+      Number(state.orangeVY);
+
+    opponent.angle =
+      Number(state.orangeAngle);
+  } else {
+    opponent.x =
+      Number(state.blueX);
+
+    opponent.y =
+      Number(state.blueY);
+
+    opponent.vx =
+      Number(state.blueVX);
+
+    opponent.vy =
+      Number(state.blueVY);
+
+    opponent.angle =
+      Number(state.blueAngle);
+  }
+
+  if (
+    Array.isArray(
+      state.boostPads
+    )
+  ) {
+    state.boostPads.forEach(
+      (remotePad, index) => {
+        if (!boostPads[index]) {
+          return;
+        }
+
+        boostPads[index].active =
+          !!remotePad.active;
+
+        boostPads[index].respawnAt =
+          Number(
+            remotePad.respawnAt
+          ) || 0;
+      }
+    );
+  }
+
+  if (
+    player.team === "blue"
+  ) {
+    gameState.playerPoints =
+      gameState.bluePoints;
+  } else {
+    gameState.playerPoints =
+      gameState.orangePoints;
+  }
+
+  updateHUD();
+
+  if (
+    gameState.timeRemaining <=
+      0 &&
+    gameState.running
+  ) {
+    gameState.timeRemaining =
+      0;
+
+    endMatch();
+  }
+}
+
+/* =========================================================
+   OPPONENT LEAVES
+========================================================= */
+
+function handleOpponentLeft() {
+  if (
+    gameState.mode !==
+    "online"
+  ) {
+    return;
+  }
+
+  gameState.running =
+    false;
+
+  closeWebSocket(false);
+
+  showEndScreen(
+    player.team === "blue"
+      ? "BLUE WINS"
+      : "ORANGE WINS",
+    "OPPONENT LEFT"
+  );
 }
 
 /* =========================================================
@@ -1295,27 +1532,11 @@ function sendGameState() {
 ========================================================= */
 
 function showMatchIntro() {
-  if (!matchIntro) return;
+  if (!matchIntro) {
+    return;
+  }
 
   show(matchIntro);
-
-  const blue =
-    matchIntro.querySelector(
-      ".blue-intro"
-    );
-
-  const orange =
-    matchIntro.querySelector(
-      ".orange-intro"
-    );
-
-  if (blue) {
-    blue.textContent = "BLUE";
-  }
-
-  if (orange) {
-    orange.textContent = "ORANGE";
-  }
 }
 
 /* =========================================================
@@ -1323,32 +1544,43 @@ function showMatchIntro() {
 ========================================================= */
 
 function startCountdown() {
-  if (gameState.running) return;
+  if (gameState.running) {
+    return;
+  }
 
   hide(matchIntro);
 
-  gameState.countdown = true;
+  gameState.countdown =
+    true;
 
   show(countdownElement);
 
   let number = 3;
 
-  countdownElement.textContent =
-    number;
+  if (countdownElement) {
+    countdownElement.textContent =
+      number;
+  }
 
   const interval =
     setInterval(() => {
       number--;
 
       if (number > 0) {
-        countdownElement.textContent =
-          number;
+        if (countdownElement) {
+          countdownElement.textContent =
+            number;
+        }
+
         return;
       }
 
       if (number === 0) {
-        countdownElement.textContent =
-          "GO!";
+        if (countdownElement) {
+          countdownElement.textContent =
+            "GO!";
+        }
+
         return;
       }
 
@@ -1356,9 +1588,17 @@ function startCountdown() {
 
       hide(countdownElement);
 
-      gameState.countdown = false;
-      gameState.running = true;
-      gameState.paused = false;
+      gameState.countdown =
+        false;
+
+      gameState.running =
+        true;
+
+      gameState.paused =
+        false;
+
+      gameState.lastFrame =
+        performance.now();
     }, 800);
 }
 
@@ -1367,16 +1607,17 @@ function startCountdown() {
 ========================================================= */
 
 function resetBoostPads() {
-  BOOST_PADS.forEach(pad => {
+  boostPads.forEach(pad => {
     pad.active = true;
     pad.respawnAt = 0;
   });
 }
 
 function updateBoostPads() {
-  const now = Date.now();
+  const now =
+    Date.now();
 
-  BOOST_PADS.forEach(pad => {
+  boostPads.forEach(pad => {
     if (
       !pad.active &&
       now >= pad.respawnAt
@@ -1387,9 +1628,22 @@ function updateBoostPads() {
   });
 }
 
+/* =========================================================
+   COLLECT BOOST
+========================================================= */
+
 function collectBoostPad(car) {
-  BOOST_PADS.forEach(pad => {
-    if (!pad.active) return;
+  for (
+    let i = 0;
+    i < boostPads.length;
+    i++
+  ) {
+    const pad =
+      boostPads[i];
+
+    if (!pad.active) {
+      continue;
+    }
 
     const dist =
       Math.hypot(
@@ -1397,50 +1651,96 @@ function collectBoostPad(car) {
         car.y - pad.y
       );
 
-    if (dist > 32) return;
+    if (
+      dist >
+      PLAYER_RADIUS +
+        BOOST_PAD_RADIUS
+    ) {
+      continue;
+    }
 
     car.boost =
       Math.min(
         BOOST_MAX,
-        car.boost + BOOST_PAD_AMOUNT
+        car.boost +
+          BOOST_PAD_AMOUNT
       );
 
-    pad.active = false;
+    pad.active =
+      false;
 
     pad.respawnAt =
       Date.now() +
-      BOOST_PAD_RESPAWN_TIME;
-  });
+      BOOST_PAD_RESPAWN;
+  }
 }
 
 /* =========================================================
-   MATCH RESET
+   RESET MATCH
 ========================================================= */
 
 function resetMatch() {
-  gameState.running = false;
-  gameState.paused = false;
+  gameState.running =
+    false;
+
+  gameState.paused =
+    false;
+
+  gameState.countdown =
+    false;
 
   gameState.timeRemaining =
     MATCH_DURATION;
 
-  gameState.blueScore = 0;
-  gameState.orangeScore = 0;
+  gameState.blueScore =
+    0;
 
-  gameState.playerPoints = 0;
+  gameState.orangeScore =
+    0;
 
-  gameState.blueGoals = 0;
-  gameState.orangeGoals = 0;
+  gameState.bluePoints =
+    0;
 
-  gameState.goalInProgress = false;
+  gameState.orangePoints =
+    0;
 
-  gameState.lastBallTouchBy = null;
-  gameState.lastSaveBy = null;
+  gameState.playerPoints =
+    0;
+
+  gameState.blueGoals =
+    0;
+
+  gameState.orangeGoals =
+    0;
+
+  gameState.goalInProgress =
+    false;
+
+  gameState.lastPointTime.blue =
+    0;
+
+  gameState.lastPointTime.orange =
+    0;
+
+  gameState.saveCooldown.blue =
+    0;
+
+  gameState.saveCooldown.orange =
+    0;
+
+  player.team =
+    gameState.team ||
+    "blue";
+
+  opponent.team =
+    player.team === "blue"
+      ? "orange"
+      : "blue";
 
   player.x =
-    player.team === "orange"
-      ? 900
-      : 300;
+    player.team === "blue"
+      ? 300
+      : 900;
 
   player.y =
     CANVAS_HEIGHT / 2;
@@ -1449,17 +1749,17 @@ function resetMatch() {
   player.vy = 0;
 
   player.angle =
-    player.team === "orange"
-      ? Math.PI
-      : 0;
+    player.team === "blue"
+      ? 0
+      : Math.PI;
 
   player.boost =
     BOOST_MAX;
 
   opponent.x =
-    player.team === "orange"
-      ? 300
-      : 900;
+    player.team === "blue"
+      ? 900
+      : 300;
 
   opponent.y =
     CANVAS_HEIGHT / 2;
@@ -1468,16 +1768,19 @@ function resetMatch() {
   opponent.vy = 0;
 
   opponent.angle =
-    player.team === "orange"
-      ? 0
-      : Math.PI;
+    player.team === "blue"
+      ? Math.PI
+      : 0;
 
   opponent.boost =
     BOOST_MAX;
 
-  opponent.remoteInput = null;
+  opponent.remoteInput =
+    null;
 
-  bot.x = 900;
+  bot.x =
+    900;
+
   bot.y =
     CANVAS_HEIGHT / 2;
 
@@ -1491,7 +1794,6 @@ function resetMatch() {
     BOOST_MAX;
 
   resetBall();
-
   resetBoostPads();
 
   updateHUD();
@@ -1502,7 +1804,7 @@ function resetMatch() {
 }
 
 /* =========================================================
-   BALL
+   RESET BALL
 ========================================================= */
 
 function resetBall() {
@@ -1514,7 +1816,17 @@ function resetBall() {
 
   ball.vx = 0;
   ball.vy = 0;
+
+  ball.lastTouchTeam =
+    null;
+
+  ball.lastTouchTime =
+    0;
 }
+
+/* =========================================================
+   BALL SPEED
+========================================================= */
 
 function limitBallSpeed() {
   const speed =
@@ -1523,7 +1835,10 @@ function limitBallSpeed() {
       ball.vy
     );
 
-  if (speed <= MAX_BALL_SPEED) {
+  if (
+    speed <=
+    MAX_BALL_SPEED
+  ) {
     return;
   }
 
@@ -1565,32 +1880,36 @@ function updatePlayer() {
       gameState.controls.boost
     ];
 
-  let acceleration = 0;
-
   if (forward) {
-    acceleration +=
+    player.vx +=
+      Math.cos(player.angle) *
+      PLAYER_ACCELERATION;
+
+    player.vy +=
+      Math.sin(player.angle) *
       PLAYER_ACCELERATION;
   }
 
   if (reverse) {
-    acceleration -=
-      PLAYER_ACCELERATION * 0.7;
+    player.vx -=
+      Math.cos(player.angle) *
+      PLAYER_ACCELERATION *
+      0.7;
+
+    player.vy -=
+      Math.sin(player.angle) *
+      PLAYER_ACCELERATION *
+      0.7;
   }
 
-  player.vx +=
-    Math.cos(player.angle) *
-    acceleration;
-
-  player.vy +=
-    Math.sin(player.angle) *
-    acceleration;
-
   if (left) {
-    player.angle -= 0.055;
+    player.angle -=
+      0.055;
   }
 
   if (right) {
-    player.angle += 0.055;
+    player.angle +=
+      0.055;
   }
 
   if (
@@ -1625,14 +1944,25 @@ function updatePlayer() {
   player.vy *=
     PLAYER_FRICTION;
 
-  limitPlayerSpeed();
+  limitCarSpeed(player);
 
-  player.x += player.vx;
-  player.y += player.vy;
+  player.x +=
+    player.vx;
 
-  keepCarInsideField(player);
+  player.y +=
+    player.vy;
 
-  collectBoostPad(player);
+  keepCarInsideField(
+    player
+  );
+
+  if (
+    gameState.mode !==
+      "online" ||
+    gameState.isHost
+  ) {
+    collectBoostPad(player);
+  }
 
   player.speed =
     Math.hypot(
@@ -1641,15 +1971,16 @@ function updatePlayer() {
     );
 }
 
-function limitPlayerSpeed() {
+function limitCarSpeed(car) {
   const speed =
     Math.hypot(
-      player.vx,
-      player.vy
+      car.vx,
+      car.vy
     );
 
   if (
-    speed <= PLAYER_MAX_SPEED
+    speed <=
+    PLAYER_MAX_SPEED
   ) {
     return;
   }
@@ -1658,72 +1989,98 @@ function limitPlayerSpeed() {
     PLAYER_MAX_SPEED /
     speed;
 
-  player.vx *= factor;
-  player.vy *= factor;
+  car.vx *= factor;
+  car.vy *= factor;
 }
 
+/* =========================================================
+   KEEP CAR INSIDE MAP
+========================================================= */
+
 function keepCarInsideField(car) {
-  const margin = 35;
+  const margin =
+    PLAYER_RADIUS + 5;
 
   car.x =
     clamp(
       car.x,
-      margin,
-      CANVAS_WIDTH - margin
+      FIELD_LEFT + margin,
+      FIELD_RIGHT - margin
     );
 
   car.y =
     clamp(
       car.y,
-      margin,
-      CANVAS_HEIGHT - margin
+      FIELD_TOP + margin,
+      FIELD_BOTTOM - margin
     );
+
+  if (
+    car.x <=
+      FIELD_LEFT + margin ||
+    car.x >=
+      FIELD_RIGHT - margin
+  ) {
+    car.vx *= -0.25;
+  }
+
+  if (
+    car.y <=
+      FIELD_TOP + margin ||
+    car.y >=
+      FIELD_BOTTOM - margin
+  ) {
+    car.vy *= -0.25;
+  }
 }
 
 /* =========================================================
-   OFFLINE AI
+   BOT
 ========================================================= */
 
 function updateBot() {
-  const targetX = ball.x;
-  const targetY = ball.y;
-
   const dx =
-    targetX - bot.x;
+    ball.x - bot.x;
 
   const dy =
-    targetY - bot.y;
+    ball.y - bot.y;
 
   const targetAngle =
-    Math.atan2(dy, dx);
+    Math.atan2(
+      dy,
+      dx
+    );
 
-  let angleDifference =
-    targetAngle - bot.angle;
+  let difference =
+    targetAngle -
+    bot.angle;
 
   while (
-    angleDifference > Math.PI
+    difference > Math.PI
   ) {
-    angleDifference -=
+    difference -=
       Math.PI * 2;
   }
 
   while (
-    angleDifference < -Math.PI
+    difference < -Math.PI
   ) {
-    angleDifference +=
+    difference +=
       Math.PI * 2;
   }
 
   if (
-    angleDifference > 0.05
+    difference > 0.05
   ) {
-    bot.angle += 0.045;
+    bot.angle +=
+      0.045;
   }
 
   if (
-    angleDifference < -0.05
+    difference < -0.05
   ) {
-    bot.angle -= 0.045;
+    bot.angle -=
+      0.045;
   }
 
   bot.vx +=
@@ -1741,7 +2098,8 @@ function updateBot() {
     );
 
   if (
-    speed > BOT_MAX_SPEED
+    speed >
+    BOT_MAX_SPEED
   ) {
     const factor =
       BOT_MAX_SPEED /
@@ -1752,7 +2110,8 @@ function updateBot() {
   }
 
   if (
-    distance(bot, ball) < 180 &&
+    distance(bot, ball) <
+      180 &&
     bot.boost > 0
   ) {
     bot.vx +=
@@ -1785,7 +2144,9 @@ function updateBot() {
   bot.x += bot.vx;
   bot.y += bot.vy;
 
-  keepCarInsideField(bot);
+  keepCarInsideField(
+    bot
+  );
 
   collectBoostPad(bot);
 
@@ -1809,11 +2170,13 @@ function updateOnlineOpponent() {
     opponent.remoteInput;
 
   if (input.left) {
-    opponent.angle -= 0.055;
+    opponent.angle -=
+      0.055;
   }
 
   if (input.right) {
-    opponent.angle += 0.055;
+    opponent.angle +=
+      0.055;
   }
 
   if (input.forward) {
@@ -1870,22 +2233,7 @@ function updateOnlineOpponent() {
   opponent.vy *=
     PLAYER_FRICTION;
 
-  const speed =
-    Math.hypot(
-      opponent.vx,
-      opponent.vy
-    );
-
-  if (
-    speed > PLAYER_MAX_SPEED
-  ) {
-    const factor =
-      PLAYER_MAX_SPEED /
-      speed;
-
-    opponent.vx *= factor;
-    opponent.vy *= factor;
-  }
+  limitCarSpeed(opponent);
 
   opponent.x +=
     opponent.vx;
@@ -1893,9 +2241,19 @@ function updateOnlineOpponent() {
   opponent.y +=
     opponent.vy;
 
-  keepCarInsideField(opponent);
+  keepCarInsideField(
+    opponent
+  );
 
-  collectBoostPad(opponent);
+  collectBoostPad(
+    opponent
+  );
+
+  opponent.speed =
+    Math.hypot(
+      opponent.vx,
+      opponent.vy
+    );
 }
 
 /* =========================================================
@@ -1906,170 +2264,118 @@ function updateBall() {
   ball.x += ball.vx;
   ball.y += ball.vy;
 
-  ball.vx *= 0.992;
-  ball.vy *= 0.992;
+  ball.vx *=
+    0.994;
 
-  if (
-    ball.y - BALL_RADIUS < 20
-  ) {
-    ball.y =
-      20 + BALL_RADIUS;
+  ball.vy *=
+    0.994;
 
-    ball.vy =
-      Math.abs(ball.vy);
-  }
-
-  if (
-    ball.y + BALL_RADIUS >
-    CANVAS_HEIGHT - 20
-  ) {
-    ball.y =
-      CANVAS_HEIGHT -
-      20 -
-      BALL_RADIUS;
-
-    ball.vy =
-      -Math.abs(ball.vy);
-  }
-
-  const inGoalOpening =
+  const insideGoal =
     ball.y >= GOAL_TOP &&
     ball.y <= GOAL_BOTTOM;
 
+  /* Mur haut */
+
   if (
-    ball.x - BALL_RADIUS < 20
+    ball.y - BALL_RADIUS <=
+    FIELD_TOP
   ) {
-    if (inGoalOpening) {
+    ball.y =
+      FIELD_TOP +
+      BALL_RADIUS;
+
+    ball.vy =
+      Math.abs(ball.vy) *
+      0.92;
+  }
+
+  /* Mur bas */
+
+  if (
+    ball.y + BALL_RADIUS >=
+    FIELD_BOTTOM
+  ) {
+    ball.y =
+      FIELD_BOTTOM -
+      BALL_RADIUS;
+
+    ball.vy =
+      -Math.abs(ball.vy) *
+      0.92;
+  }
+
+  /* But gauche */
+
+  if (
+    ball.x - BALL_RADIUS <
+    FIELD_LEFT
+  ) {
+    if (insideGoal) {
       scoreGoal("orange");
       return;
     }
 
     ball.x =
-      20 + BALL_RADIUS;
+      FIELD_LEFT +
+      BALL_RADIUS;
 
     ball.vx =
-      Math.abs(ball.vx);
+      Math.abs(ball.vx) *
+      0.92;
   }
+
+  /* But droit */
 
   if (
     ball.x + BALL_RADIUS >
-    CANVAS_WIDTH - 20
+    FIELD_RIGHT
   ) {
-    if (inGoalOpening) {
+    if (insideGoal) {
       scoreGoal("blue");
       return;
     }
 
     ball.x =
-      CANVAS_WIDTH -
-      20 -
+      FIELD_RIGHT -
       BALL_RADIUS;
 
     ball.vx =
-      -Math.abs(ball.vx);
+      -Math.abs(ball.vx) *
+      0.92;
+  }
+
+  /* Profondeur des cages */
+
+  if (
+    insideGoal
+  ) {
+    if (
+      ball.x <
+      FIELD_LEFT + GOAL_DEPTH
+    ) {
+      ball.vx *=
+        0.995;
+    }
+
+    if (
+      ball.x >
+      FIELD_RIGHT - GOAL_DEPTH
+    ) {
+      ball.vx *=
+        0.995;
+    }
   }
 
   limitBallSpeed();
 }
 
 /* =========================================================
-   SAVE ZONES
-========================================================= */
-
-function isInsideSaveZone(car, team) {
-  if (team === "blue") {
-    return (
-      car.x >= 20 &&
-      car.x <=
-        20 + SAVE_ZONE_WIDTH &&
-      car.y >=
-        GOAL_TOP - 35 &&
-      car.y <=
-        GOAL_BOTTOM + 35
-    );
-  }
-
-  return (
-    car.x >=
-      CANVAS_WIDTH -
-      20 -
-      SAVE_ZONE_WIDTH &&
-    car.x <=
-      CANVAS_WIDTH - 20 &&
-    car.y >=
-      GOAL_TOP - 35 &&
-    car.y <=
-      GOAL_BOTTOM + 35
-  );
-}
-
-function checkForSave(car, team) {
-  if (
-    gameState.lastBallTouchBy === car
-  ) {
-    return;
-  }
-
-  if (
-    !isInsideSaveZone(car, team)
-  ) {
-    return;
-  }
-
-  const ballHeadingTowardGoal =
-    team === "blue"
-      ? ball.vx < 0
-      : ball.vx > 0;
-
-  if (!ballHeadingTowardGoal) {
-    return;
-  }
-
-  const dist =
-    distance(car, ball);
-
-  if (
-    dist >
-    PLAYER_RADIUS +
-    BALL_RADIUS +
-    25
-  ) {
-    return;
-  }
-
-  if (
-    gameState.lastSaveBy === car
-  ) {
-    return;
-  }
-
-  gameState.lastSaveBy = car;
-
-  addPoints(
-    50,
-    car === player
-  );
-
-  if (car === player) {
-    createPointNotification(
-      "+50 SAVE"
-    );
-  }
-
-  setTimeout(() => {
-    if (
-      gameState.lastSaveBy === car
-    ) {
-      gameState.lastSaveBy = null;
-    }
-  }, 500);
-}
-
-/* =========================================================
    CAR / BALL COLLISION
 ========================================================= */
 
-function collideCarWithBall(car, team) {
+function collideCarWithBall(
+  car
+) {
   const dx =
     ball.x - car.x;
 
@@ -2077,17 +2383,20 @@ function collideCarWithBall(car, team) {
     ball.y - car.y;
 
   const dist =
-    Math.hypot(dx, dy);
+    Math.hypot(
+      dx,
+      dy
+    );
 
   const minDistance =
     PLAYER_RADIUS +
     BALL_RADIUS;
 
   if (
-    dist === 0 ||
+    dist <= 0 ||
     dist >= minDistance
   ) {
-    return;
+    return false;
   }
 
   const nx =
@@ -2100,35 +2409,68 @@ function collideCarWithBall(car, team) {
     minDistance - dist;
 
   car.x -=
-    nx * overlap * 0.5;
+    nx *
+    overlap *
+    0.45;
 
   car.y -=
-    ny * overlap * 0.5;
+    ny *
+    overlap *
+    0.45;
 
   ball.x +=
-    nx * overlap * 0.5;
+    nx *
+    overlap *
+    0.55;
 
   ball.y +=
-    ny * overlap * 0.5;
+    ny *
+    overlap *
+    0.55;
+
+  const relativeSpeed =
+    Math.hypot(
+      car.vx,
+      car.vy
+    );
 
   const carVelocity =
     car.vx * nx +
     car.vy * ny;
 
+  const hitPower =
+    3.0 +
+    Math.abs(
+      carVelocity
+    ) * 1.3;
+
   ball.vx +=
-    nx *
-    (2.2 + Math.abs(carVelocity));
+    nx * hitPower;
 
   ball.vy +=
-    ny *
-    (2.2 + Math.abs(carVelocity));
+    ny * hitPower;
+
+  if (
+    relativeSpeed >
+    1
+  ) {
+    ball.vx +=
+      car.vx * 0.35;
+
+    ball.vy +=
+      car.vy * 0.35;
+  }
 
   limitBallSpeed();
 
-  gameState.lastBallTouchBy =
-    car;
+  ball.lastTouchTeam =
+    car.team;
 
-  addPoints(
+  ball.lastTouchTime =
+    Date.now();
+
+  addTeamPoints(
+    car.team,
     2,
     car === player
   );
@@ -2137,18 +2479,149 @@ function collideCarWithBall(car, team) {
     car === player
   ) {
     createPointNotification(
-      "+2 BALL TOUCH"
+      "+2 TOUCH"
     );
   }
 
-  checkForSave(
-    car,
-    team
+  checkSave(
+    car
   );
+
+  return true;
 }
 
 /* =========================================================
-   GOALS
+   SAVE ZONES
+   INVISIBLE
+========================================================= */
+
+function isInsideSaveZone(
+  car
+) {
+  if (
+    car.team === "blue"
+  ) {
+    return (
+      car.x >=
+        FIELD_LEFT &&
+      car.x <=
+        FIELD_LEFT + 135 &&
+      car.y >=
+        GOAL_TOP - 35 &&
+      car.y <=
+        GOAL_BOTTOM + 35
+    );
+  }
+
+  return (
+    car.x >=
+      FIELD_RIGHT - 135 &&
+    car.x <=
+      FIELD_RIGHT &&
+    car.y >=
+      GOAL_TOP - 35 &&
+    car.y <=
+      GOAL_BOTTOM + 35
+  );
+}
+
+function checkSave(car) {
+  if (
+    !isInsideSaveZone(car)
+  ) {
+    return;
+  }
+
+  const team =
+    car.team;
+
+  const now =
+    Date.now();
+
+  if (
+    now <
+    gameState.saveCooldown[
+      team
+    ]
+  ) {
+    return;
+  }
+
+  const ballGoingTowardGoal =
+    team === "blue"
+      ? ball.vx < 0
+      : ball.vx > 0;
+
+  if (
+    !ballGoingTowardGoal
+  ) {
+    return;
+  }
+
+  const dist =
+    distance(
+      car,
+      ball
+    );
+
+  if (
+    dist >
+    PLAYER_RADIUS +
+      BALL_RADIUS +
+      20
+  ) {
+    return;
+  }
+
+  gameState.saveCooldown[
+    team
+  ] =
+    now + 1200;
+
+  addTeamPoints(
+    team,
+    50,
+    car === player
+  );
+
+  if (
+    car === player
+  ) {
+    createPointNotification(
+      "+50 SAVE"
+    );
+  }
+}
+
+/* =========================================================
+   POINTS
+========================================================= */
+
+function addTeamPoints(
+  team,
+  amount,
+  isLocalPlayer
+) {
+  if (team === "blue") {
+    gameState.bluePoints +=
+      amount;
+  }
+
+  if (team === "orange") {
+    gameState.orangePoints +=
+      amount;
+  }
+
+  if (isLocalPlayer) {
+    gameState.playerPoints +=
+      amount;
+  }
+
+  updateHUD();
+}
+
+/* =========================================================
+   GOAL
 ========================================================= */
 
 function scoreGoal(team) {
@@ -2158,7 +2631,8 @@ function scoreGoal(team) {
     return;
   }
 
-  gameState.goalInProgress = true;
+  gameState.goalInProgress =
+    true;
 
   if (team === "blue") {
     gameState.blueScore++;
@@ -2168,23 +2642,29 @@ function scoreGoal(team) {
     gameState.orangeGoals++;
   }
 
-  addPoints(
+  addTeamPoints(
+    team,
     150,
     team === player.team
   );
 
-  if (team === player.team) {
+  if (
+    team === player.team
+  ) {
     createPointNotification(
       "+150 GOAL"
     );
   }
 
-  showGoalOverlay(team);
+  showGoalOverlay(
+    team
+  );
 
   updateHUD();
 
   if (
-    gameState.mode === "online" &&
+    gameState.mode ===
+      "online" &&
     gameState.isHost
   ) {
     sendGameState();
@@ -2193,16 +2673,20 @@ function scoreGoal(team) {
   setTimeout(() => {
     resetBall();
 
-    gameState.lastBallTouchBy = null;
-    gameState.lastSaveBy = null;
-
-    gameState.goalInProgress = false;
+    gameState.goalInProgress =
+      false;
 
     hide(goalMessage);
-  }, 1600);
+  }, 1700);
 }
 
-function showGoalOverlay(team) {
+/* =========================================================
+   GOAL MESSAGE
+========================================================= */
+
+function showGoalOverlay(
+  team
+) {
   show(goalMessage);
 
   if (goalText) {
@@ -2218,49 +2702,12 @@ function showGoalOverlay(team) {
 }
 
 /* =========================================================
-   POINTS
+   POINT NOTIFICATION
 ========================================================= */
 
-function addPoints(amount, belongsToPlayer) {
-  if (!belongsToPlayer) {
-    return;
-  }
-
-  gameState.playerPoints +=
-    amount;
-
-  updateHUD();
-
-  if (playerPointsElement) {
-    const panel =
-      playerPointsElement
-        .parentElement;
-
-    if (panel) {
-      panel.classList.remove(
-        "earned"
-      );
-
-      void panel.offsetWidth;
-
-      panel.classList.add(
-        "earned"
-      );
-    }
-  }
-}
-
-function createPointNotification(text) {
-  if (!gameWrapper) return;
-
-  const element =
-    document.createElement("div");
-
-  element.className =
-    "points-notification";
-
-  element.textContent = text;
-
+function createPointNotification(
+  text
+) {
   const arena =
     document.getElementById(
       "arenaContainer"
@@ -2268,7 +2715,20 @@ function createPointNotification(text) {
 
   if (!arena) return;
 
-  arena.appendChild(element);
+  const element =
+    document.createElement(
+      "div"
+    );
+
+  element.className =
+    "points-notification";
+
+  element.textContent =
+    text;
+
+  arena.appendChild(
+    element
+  );
 
   requestAnimationFrame(() => {
     element.classList.add(
@@ -2278,85 +2738,112 @@ function createPointNotification(text) {
 
   setTimeout(() => {
     element.remove();
-  }, 1300);
+  }, 1200);
 }
 
 /* =========================================================
-   UPDATE HUD
+   HUD
 ========================================================= */
 
 function updateHUD() {
-  if (blueScoreElement) {
+  if (
+    blueScoreElement
+  ) {
     blueScoreElement.textContent =
       gameState.blueScore;
   }
 
-  if (orangeScoreElement) {
+  if (
+    orangeScoreElement
+  ) {
     orangeScoreElement.textContent =
       gameState.orangeScore;
   }
 
-  if (timerElement) {
+  if (
+    timerElement
+  ) {
     timerElement.textContent =
       formatTime(
         gameState.timeRemaining
       );
   }
 
-  if (playerPointsElement) {
+  if (
+    playerPointsElement
+  ) {
     playerPointsElement.textContent =
       gameState.playerPoints;
   }
 
-  if (boostFill) {
+  if (
+    boostFill
+  ) {
     boostFill.style.width =
-      player.boost + "%";
+      `${player.boost}%`;
   }
 
-  if (boostNumber) {
+  if (
+    boostNumber
+  ) {
     boostNumber.textContent =
       Math.round(
         player.boost
       );
   }
 
-  if (speedNumber) {
-    const speedKmh =
+  if (
+    speedNumber
+  ) {
+    const kmh =
       Math.round(
-        player.speed * 7.1
+        player.speed *
+          7.1
       );
 
     speedNumber.textContent =
-      speedKmh;
+      kmh;
   }
 }
 
 /* =========================================================
-   GAME TIMER
+   TIMER
 ========================================================= */
 
-function updateTimer(delta) {
+function updateTimer(
+  delta
+) {
+  if (
+    gameState.mode ===
+      "online" &&
+    !gameState.isHost
+  ) {
+    return;
+  }
+
   gameState.timeRemaining -=
     delta;
 
   if (
-    gameState.timeRemaining <= 0
+    gameState.timeRemaining <=
+    0
   ) {
-    gameState.timeRemaining = 0;
+    gameState.timeRemaining =
+      0;
 
     endMatch();
 
     return;
   }
 
+  updateHUD();
+
   if (
-    gameState.mode === "online" &&
-    gameState.isHost
+    gameState.mode ===
+      "online"
   ) {
     sendGameState();
   }
-
-  updateHUD();
 }
 
 /* =========================================================
@@ -2365,8 +2852,14 @@ function updateTimer(delta) {
 
 function togglePause() {
   if (
-    !gameState.running ||
-    gameState.mode === "online"
+    !gameState.running
+  ) {
+    return;
+  }
+
+  if (
+    gameState.mode ===
+    "online"
   ) {
     return;
   }
@@ -2374,7 +2867,9 @@ function togglePause() {
   gameState.paused =
     !gameState.paused;
 
-  if (gameState.paused) {
+  if (
+    gameState.paused
+  ) {
     show(pauseMenu);
   } else {
     hide(pauseMenu);
@@ -2382,30 +2877,36 @@ function togglePause() {
 }
 
 /* =========================================================
-   END MATCH
+   END
 ========================================================= */
 
 function endMatch() {
-  if (!gameState.running) {
+  if (
+    !gameState.running
+  ) {
     return;
   }
 
-  gameState.running = false;
+  gameState.running =
+    false;
 
-  let winner = "DRAW";
+  let winner =
+    "DRAW";
 
   if (
     gameState.blueScore >
     gameState.orangeScore
   ) {
-    winner = "BLUE WINS";
+    winner =
+      "BLUE WINS";
   }
 
   if (
     gameState.orangeScore >
     gameState.blueScore
   ) {
-    winner = "ORANGE WINS";
+    winner =
+      "ORANGE WINS";
   }
 
   showEndScreen(
@@ -2421,11 +2922,11 @@ function showEndScreen(
   hide(pauseMenu);
   hide(goalMessage);
 
-  if (endScreen) {
-    show(endScreen);
-  }
+  show(endScreen);
 
-  if (finalScore) {
+  if (
+    finalScore
+  ) {
     finalScore.textContent =
       `${gameState.blueScore} - ${gameState.orangeScore}`;
   }
@@ -2435,7 +2936,9 @@ function showEndScreen(
       "winnerDisplay"
     );
 
-  if (winnerDisplay) {
+  if (
+    winnerDisplay
+  ) {
     winnerDisplay.textContent =
       winner;
   }
@@ -2445,19 +2948,27 @@ function showEndScreen(
       ".result-title"
     );
 
-  if (resultTitle) {
+  if (
+    resultTitle
+  ) {
     resultTitle.textContent =
       reason;
   }
 }
 
 /* =========================================================
-   MAIN MENU AFTER MATCH
+   RETURN MAIN MENU
 ========================================================= */
 
 function returnToMainMenu() {
-  gameState.running = false;
-  gameState.paused = false;
+  gameState.running =
+    false;
+
+  gameState.paused =
+    false;
+
+  gameState.onlineSearching =
+    false;
 
   closeWebSocket(true);
 
@@ -2467,13 +2978,13 @@ function returnToMainMenu() {
   hide(countdownElement);
   hide(goalMessage);
 
-  const searchMenu =
+  const search =
     document.getElementById(
       "searchMenu"
     );
 
-  if (searchMenu) {
-    searchMenu.remove();
+  if (search) {
+    search.remove();
   }
 
   buildMainMenu();
@@ -2490,13 +3001,14 @@ function restartMatch() {
 
   showMatchIntro();
 
-  setTimeout(() => {
-    startCountdown();
-  }, 500);
+  setTimeout(
+    startCountdown,
+    500
+  );
 }
 
 /* =========================================================
-   RENDER FIELD
+   DRAW MAP
 ========================================================= */
 
 function drawField() {
@@ -2512,7 +3024,7 @@ function drawField() {
   /* Fond */
 
   ctx.fillStyle =
-    "#071421";
+    "#06101b";
 
   ctx.fillRect(
     0,
@@ -2521,18 +3033,55 @@ function drawField() {
     CANVAS_HEIGHT
   );
 
+  /* Terrain */
+
+  ctx.fillStyle =
+    "#102b38";
+
+  ctx.fillRect(
+    FIELD_LEFT,
+    FIELD_TOP,
+    FIELD_RIGHT -
+      FIELD_LEFT,
+    FIELD_BOTTOM -
+      FIELD_TOP
+  );
+
+  /* Bandes du terrain */
+
+  ctx.fillStyle =
+    "rgba(255,255,255,0.018)";
+
+  for (
+    let x =
+      FIELD_LEFT;
+    x <
+      FIELD_RIGHT;
+    x += 60
+  ) {
+    ctx.fillRect(
+      x,
+      FIELD_TOP,
+      30,
+      FIELD_BOTTOM -
+        FIELD_TOP
+    );
+  }
+
   /* Bordure */
 
   ctx.strokeStyle =
-    "rgba(120,210,255,0.25)";
+    "rgba(220,245,255,0.7)";
 
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
 
   ctx.strokeRect(
-    20,
-    20,
-    CANVAS_WIDTH - 40,
-    CANVAS_HEIGHT - 40
+    FIELD_LEFT,
+    FIELD_TOP,
+    FIELD_RIGHT -
+      FIELD_LEFT,
+    FIELD_BOTTOM -
+      FIELD_TOP
   );
 
   /* Ligne centrale */
@@ -2541,12 +3090,12 @@ function drawField() {
 
   ctx.moveTo(
     CANVAS_WIDTH / 2,
-    20
+    FIELD_TOP
   );
 
   ctx.lineTo(
     CANVAS_WIDTH / 2,
-    CANVAS_HEIGHT - 20
+    FIELD_BOTTOM
   );
 
   ctx.stroke();
@@ -2558,107 +3107,306 @@ function drawField() {
   ctx.arc(
     CANVAS_WIDTH / 2,
     CANVAS_HEIGHT / 2,
-    85,
+    92,
     0,
     Math.PI * 2
   );
 
   ctx.stroke();
 
-  /* Petit cercle central */
+  /* Point central */
 
   ctx.beginPath();
 
   ctx.arc(
     CANVAS_WIDTH / 2,
     CANVAS_HEIGHT / 2,
-    8,
+    7,
     0,
     Math.PI * 2
   );
 
   ctx.fillStyle =
-    "rgba(255,255,255,0.7)";
+    "#ffffff";
 
   ctx.fill();
 
-  /* Ligne de surface gauche */
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    160,
-    20
-  );
-
-  ctx.lineTo(
-    160,
-    CANVAS_HEIGHT - 20
-  );
-
-  ctx.stroke();
-
-  /* Ligne de surface droite */
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    CANVAS_WIDTH - 160,
-    20
-  );
-
-  ctx.lineTo(
-    CANVAS_WIDTH - 160,
-    CANVAS_HEIGHT - 20
-  );
-
-  ctx.stroke();
-
-  /* Cage gauche */
-
-  ctx.fillStyle =
-    "rgba(40,200,255,0.08)";
-
-  ctx.fillRect(
-    0,
-    GOAL_TOP,
-    GOAL_DEPTH,
-    GOAL_BOTTOM - GOAL_TOP
-  );
+  /* Surface gauche */
 
   ctx.strokeStyle =
-    "rgba(40,200,255,0.6)";
+    "rgba(50,190,255,0.45)";
 
   ctx.strokeRect(
-    0,
-    GOAL_TOP,
-    GOAL_DEPTH,
-    GOAL_BOTTOM - GOAL_TOP
+    FIELD_LEFT,
+    GOAL_TOP - 65,
+    150,
+    GOAL_BOTTOM -
+      GOAL_TOP +
+      130
   );
 
-  /* Cage droite */
-
-  ctx.fillStyle =
-    "rgba(255,130,30,0.08)";
-
-  ctx.fillRect(
-    CANVAS_WIDTH - GOAL_DEPTH,
-    GOAL_TOP,
-    GOAL_DEPTH,
-    GOAL_BOTTOM - GOAL_TOP
-  );
+  /* Surface droite */
 
   ctx.strokeStyle =
-    "rgba(255,130,30,0.6)";
+    "rgba(255,120,40,0.45)";
 
   ctx.strokeRect(
-    CANVAS_WIDTH - GOAL_DEPTH,
-    GOAL_TOP,
-    GOAL_DEPTH,
-    GOAL_BOTTOM - GOAL_TOP
+    FIELD_RIGHT - 150,
+    GOAL_TOP - 65,
+    150,
+    GOAL_BOTTOM -
+      GOAL_TOP +
+      130
   );
+
+  drawGoals();
 
   drawBoostPads();
+}
+
+/* =========================================================
+   GOALS / CAGES
+========================================================= */
+
+function drawGoals() {
+  const goalHeight =
+    GOAL_BOTTOM -
+    GOAL_TOP;
+
+  /* =========================
+     CAGE BLEUE / GAUCHE
+  ========================= */
+
+  ctx.fillStyle =
+    "rgba(20,170,255,0.12)";
+
+  ctx.fillRect(
+    FIELD_LEFT,
+    GOAL_TOP,
+    GOAL_DEPTH,
+    goalHeight
+  );
+
+  /* Filet horizontal */
+
+  ctx.strokeStyle =
+    "rgba(80,200,255,0.22)";
+
+  ctx.lineWidth = 1;
+
+  for (
+    let y =
+      GOAL_TOP;
+    y <=
+      GOAL_BOTTOM;
+    y += 18
+  ) {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      FIELD_LEFT,
+      y
+    );
+
+    ctx.lineTo(
+      FIELD_LEFT +
+        GOAL_DEPTH,
+      y
+    );
+
+    ctx.stroke();
+  }
+
+  /* Filet vertical */
+
+  for (
+    let x =
+      FIELD_LEFT;
+    x <=
+      FIELD_LEFT +
+        GOAL_DEPTH;
+    x += 18
+  ) {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      GOAL_TOP
+    );
+
+    ctx.lineTo(
+      x,
+      GOAL_BOTTOM
+    );
+
+    ctx.stroke();
+  }
+
+  /* Poteaux */
+
+  drawGoalPost(
+    FIELD_LEFT,
+    GOAL_TOP,
+    "blue"
+  );
+
+  drawGoalPost(
+    FIELD_LEFT,
+    GOAL_BOTTOM,
+    "blue"
+  );
+
+  /* Barre */
+
+  ctx.strokeStyle =
+    "#42c9ff";
+
+  ctx.lineWidth = 7;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    FIELD_LEFT,
+    GOAL_TOP
+  );
+
+  ctx.lineTo(
+    FIELD_LEFT,
+    GOAL_BOTTOM
+  );
+
+  ctx.stroke();
+
+  /* =========================
+     CAGE ORANGE / DROITE
+  ========================= */
+
+  ctx.fillStyle =
+    "rgba(255,100,25,0.12)";
+
+  ctx.fillRect(
+    FIELD_RIGHT -
+      GOAL_DEPTH,
+    GOAL_TOP,
+    GOAL_DEPTH,
+    goalHeight
+  );
+
+  ctx.strokeStyle =
+    "rgba(255,140,60,0.22)";
+
+  ctx.lineWidth = 1;
+
+  for (
+    let y =
+      GOAL_TOP;
+    y <=
+      GOAL_BOTTOM;
+    y += 18
+  ) {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      FIELD_RIGHT -
+        GOAL_DEPTH,
+      y
+    );
+
+    ctx.lineTo(
+      FIELD_RIGHT,
+      y
+    );
+
+    ctx.stroke();
+  }
+
+  for (
+    let x =
+      FIELD_RIGHT -
+        GOAL_DEPTH;
+    x <=
+      FIELD_RIGHT;
+    x += 18
+  ) {
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      GOAL_TOP
+    );
+
+    ctx.lineTo(
+      x,
+      GOAL_BOTTOM
+    );
+
+    ctx.stroke();
+  }
+
+  drawGoalPost(
+    FIELD_RIGHT,
+    GOAL_TOP,
+    "orange"
+  );
+
+  drawGoalPost(
+    FIELD_RIGHT,
+    GOAL_BOTTOM,
+    "orange"
+  );
+
+  ctx.strokeStyle =
+    "#ff812f";
+
+  ctx.lineWidth = 7;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    FIELD_RIGHT,
+    GOAL_TOP
+  );
+
+  ctx.lineTo(
+    FIELD_RIGHT,
+    GOAL_BOTTOM
+  );
+
+  ctx.stroke();
+}
+
+function drawGoalPost(
+  x,
+  y,
+  team
+) {
+  ctx.save();
+
+  ctx.beginPath();
+
+  ctx.arc(
+    x,
+    y,
+    GOAL_POST_RADIUS,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle =
+    team === "blue"
+      ? "#36caff"
+      : "#ff8130";
+
+  ctx.shadowBlur = 15;
+
+  ctx.shadowColor =
+    team === "blue"
+      ? "#20bfff"
+      : "#ff7020";
+
+  ctx.fill();
+
+  ctx.restore();
 }
 
 /* =========================================================
@@ -2666,35 +3414,59 @@ function drawField() {
 ========================================================= */
 
 function drawBoostPads() {
-  BOOST_PADS.forEach(pad => {
+  boostPads.forEach(pad => {
     ctx.save();
 
-    ctx.beginPath();
-
-    ctx.arc(
-      pad.x,
-      pad.y,
-      18,
-      0,
-      Math.PI * 2
-    );
-
-    if (pad.active) {
-      ctx.fillStyle =
-        "#baff35";
-
-      ctx.shadowBlur = 20;
-      ctx.shadowColor =
-        "#8cff00";
-
-      ctx.fill();
+    if (
+      pad.active
+    ) {
+      /* Halo */
 
       ctx.beginPath();
 
       ctx.arc(
         pad.x,
         pad.y,
-        8,
+        27,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle =
+        "rgba(180,255,30,0.08)";
+
+      ctx.fill();
+
+      /* Pad */
+
+      ctx.beginPath();
+
+      ctx.arc(
+        pad.x,
+        pad.y,
+        BOOST_PAD_RADIUS,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle =
+        "#b7ff32";
+
+      ctx.shadowBlur = 18;
+
+      ctx.shadowColor =
+        "#9cff00";
+
+      ctx.fill();
+
+      /* Centre */
+
+      ctx.beginPath();
+
+      ctx.arc(
+        pad.x,
+        pad.y,
+        7,
         0,
         Math.PI * 2
       );
@@ -2704,14 +3476,25 @@ function drawBoostPads() {
 
       ctx.fill();
     } else {
-      ctx.fillStyle =
-        "rgba(80,90,100,0.35)";
+      ctx.beginPath();
 
-      ctx.fill();
+      ctx.arc(
+        pad.x,
+        pad.y,
+        BOOST_PAD_RADIUS,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle =
+        "rgba(90,100,110,0.28)";
 
       ctx.strokeStyle =
-        "rgba(150,160,170,0.25)";
+        "rgba(180,190,200,0.2)";
 
+      ctx.lineWidth = 2;
+
+      ctx.fill();
       ctx.stroke();
     }
 
@@ -2728,6 +3511,25 @@ function drawBall() {
 
   ctx.save();
 
+  /* Ombre */
+
+  ctx.beginPath();
+
+  ctx.arc(
+    ball.x + 4,
+    ball.y + 5,
+    BALL_RADIUS,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle =
+    "rgba(0,0,0,0.35)";
+
+  ctx.fill();
+
+  /* Ball */
+
   ctx.beginPath();
 
   ctx.arc(
@@ -2741,9 +3543,27 @@ function drawBall() {
   ctx.fillStyle =
     "#ffffff";
 
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = 15;
+
   ctx.shadowColor =
     "#ffffff";
+
+  ctx.fill();
+
+  /* Motif */
+
+  ctx.beginPath();
+
+  ctx.arc(
+    ball.x,
+    ball.y,
+    5,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle =
+    "#172331";
 
   ctx.fill();
 
@@ -2768,79 +3588,114 @@ function drawCar(car) {
     car.angle
   );
 
-  const blue =
+  const isBlue =
     car.team === "blue";
 
-  ctx.shadowBlur = 20;
+  const mainColor =
+    isBlue
+      ? "#20cfff"
+      : "#ff852d";
 
-  ctx.shadowColor =
-    blue
+  const glowColor =
+    isBlue
       ? "#00aaff"
-      : "#ff6a00";
+      : "#ff5a00";
+
+  /* Ombre */
 
   ctx.fillStyle =
-    blue
-      ? "#20cfff"
-      : "#ff8a20";
+    "rgba(0,0,0,0.3)";
 
   ctx.fillRect(
-    -26,
+    -24,
+    -12,
+    54,
+    30
+  );
+
+  /* Car */
+
+  ctx.shadowBlur = 18;
+
+  ctx.shadowColor =
+    glowColor;
+
+  ctx.fillStyle =
+    mainColor;
+
+  ctx.fillRect(
+    -27,
     -16,
-    52,
+    54,
     32
   );
 
-  ctx.fillStyle =
-    "#071421";
+  /* Nez */
 
   ctx.fillRect(
-    -7,
+    20,
+    -11,
+    9,
+    22
+  );
+
+  /* Vitre */
+
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle =
+    "#08131e";
+
+  ctx.fillRect(
+    -5,
     -12,
     18,
     24
   );
 
+  /* Ligne centrale */
+
   ctx.fillStyle =
-    "#ffffff";
+    "rgba(255,255,255,0.45)";
 
   ctx.fillRect(
-    15,
-    -10,
-    6,
-    20
+    18,
+    -9,
+    3,
+    18
   );
 
   /* Roues */
 
   ctx.fillStyle =
-    "#111111";
+    "#080b0f";
 
   ctx.fillRect(
+    -21,
     -20,
-    -19,
     12,
-    6
+    7
   );
 
   ctx.fillRect(
     8,
-    -19,
+    -20,
     12,
-    6
+    7
   );
 
   ctx.fillRect(
-    -20,
+    -21,
     13,
     12,
-    6
+    7
   );
 
   ctx.fillRect(
     8,
     13,
     12,
-    6
+    7
   );
 
   ctx.restore();
@@ -2854,7 +3709,8 @@ function render() {
   drawField();
 
   if (
-    gameState.mode === "online"
+    gameState.mode ===
+    "online"
   ) {
     drawCar(player);
     drawCar(opponent);
@@ -2884,69 +3740,88 @@ function update(delta) {
   updatePlayer();
 
   if (
-    gameState.mode === "offline"
+    gameState.mode ===
+    "offline"
   ) {
     updateBot();
 
     collideCarWithBall(
-      bot,
-      "orange"
+      bot
     );
-  } else {
-    updateOnlineOpponent();
 
-    sendPlayerInput();
+    collideCarWithBall(
+      player
+    );
   }
-
-  updateBall();
 
   if (
-    gameState.mode === "online"
+    gameState.mode ===
+    "online"
   ) {
-    collideCarWithBall(
-      opponent,
-      opponent.team
-    );
+    sendPlayerInput();
 
-    checkForSave(
-      opponent,
-      opponent.team
-    );
+    /*
+      Le joueur hôte fait tourner
+      toute la physique.
+    */
+
+    if (
+      gameState.isHost
+    ) {
+      updateOnlineOpponent();
+
+      collideCarWithBall(
+        opponent
+      );
+
+      collideCarWithBall(
+        player
+      );
+
+      updateBall();
+    }
   }
 
-  collideCarWithBall(
-    player,
-    player.team
-  );
-
-  checkForSave(
-    player,
-    player.team
-  );
+  if (
+    gameState.mode ===
+    "offline"
+  ) {
+    updateBall();
+  }
 
   updateTimer(delta);
+
+  updateHUD();
 }
 
 /* =========================================================
    GAME LOOP
 ========================================================= */
 
-function gameLoop(timestamp) {
-  if (!gameState.lastFrame) {
+function gameLoop(
+  timestamp
+) {
+  if (
+    !gameState.lastFrame
+  ) {
     gameState.lastFrame =
       timestamp;
   }
 
   let delta =
-    (timestamp -
-      gameState.lastFrame) /
-    1000;
+    (
+      timestamp -
+      gameState.lastFrame
+    ) / 1000;
 
   gameState.lastFrame =
     timestamp;
 
   delta =
-    Math.min(delta, 0.05);
+    Math.min(
+      delta,
+      0.05
+    );
 
   update(delta);
   render();
@@ -2966,24 +3841,23 @@ window.addEventListener(
     if (
       gameState.currentSetting
     ) {
-      handleSettingKey(event);
+      handleSettingKey(
+        event
+      );
+
       return;
     }
 
     const key =
-      normalizeKey(event.key);
+      normalizeKey(
+        event.key
+      );
 
-    gameState.keys[key] = true;
+    gameState.keys[key] =
+      true;
 
     if (
       key === "p"
-    ) {
-      togglePause();
-    }
-
-    if (
-      key === "escape" &&
-      gameState.mode === "offline"
     ) {
       togglePause();
     }
@@ -2994,14 +3868,17 @@ window.addEventListener(
   "keyup",
   event => {
     const key =
-      normalizeKey(event.key);
+      normalizeKey(
+        event.key
+      );
 
-    gameState.keys[key] = false;
+    gameState.keys[key] =
+      false;
   }
 );
 
 /* =========================================================
-   BUTTON CONNECTIONS
+   BUTTONS
 ========================================================= */
 
 function connectExistingButtons() {
@@ -3010,7 +3887,9 @@ function connectExistingButtons() {
       "settingsButton"
     );
 
-  if (settingsButton) {
+  if (
+    settingsButton
+  ) {
     settingsButton.addEventListener(
       "click",
       openSettings
@@ -3022,7 +3901,9 @@ function connectExistingButtons() {
       "howToPlayButton"
     );
 
-  if (howToPlayButton) {
+  if (
+    howToPlayButton
+  ) {
     howToPlayButton.addEventListener(
       "click",
       openHowToPlay
@@ -3034,12 +3915,19 @@ function connectExistingButtons() {
       "backButton"
     );
 
-  if (backButton) {
+  if (
+    backButton
+  ) {
     backButton.addEventListener(
       "click",
       () => {
-        hide(howToPlayMenu);
-        show(mainMenu);
+        hide(
+          howToPlayMenu
+        );
+
+        show(
+          mainMenu
+        );
       }
     );
   }
@@ -3049,7 +3937,9 @@ function connectExistingButtons() {
       "settingsBackButton"
     );
 
-  if (settingsBackButton) {
+  if (
+    settingsBackButton
+  ) {
     settingsBackButton.addEventListener(
       "click",
       closeSettings
@@ -3061,7 +3951,9 @@ function connectExistingButtons() {
       "resetControlsButton"
     );
 
-  if (resetButton) {
+  if (
+    resetButton
+  ) {
     resetButton.addEventListener(
       "click",
       resetControls
@@ -3076,28 +3968,36 @@ function connectExistingButtons() {
     "boost"
   ];
 
-  actions.forEach(action => {
-    const button =
-      document.querySelector(
-        `[data-action="${action}"]`
-      );
+  actions.forEach(
+    action => {
+      const button =
+        document.querySelector(
+          `[data-action="${action}"]`
+        );
 
-    if (!button) return;
-
-    button.addEventListener(
-      "click",
-      () => {
-        waitForNewKey(action);
+      if (!button) {
+        return;
       }
-    );
-  });
+
+      button.addEventListener(
+        "click",
+        () => {
+          waitForNewKey(
+            action
+          );
+        }
+      );
+    }
+  );
 
   const restartButton =
     document.getElementById(
       "restartButton"
     );
 
-  if (restartButton) {
+  if (
+    restartButton
+  ) {
     restartButton.addEventListener(
       "click",
       restartMatch
@@ -3109,53 +4009,12 @@ function connectExistingButtons() {
       "mainMenuButton"
     );
 
-  if (mainMenuButton) {
+  if (
+    mainMenuButton
+  ) {
     mainMenuButton.addEventListener(
       "click",
       returnToMainMenu
-    );
-  }
-
-  const confirmConcedeButton =
-    document.getElementById(
-      "confirmConcedeButton"
-    );
-
-  if (confirmConcedeButton) {
-    confirmConcedeButton.addEventListener(
-      "click",
-      () => {
-        gameState.running = false;
-
-        hide(
-          document.getElementById(
-            "concedeConfirm"
-          )
-        );
-
-        showEndScreen(
-          "ORANGE WINS",
-          "MATCH CONCEDED"
-        );
-      }
-    );
-  }
-
-  const cancelConcedeButton =
-    document.getElementById(
-      "cancelConcedeButton"
-    );
-
-  if (cancelConcedeButton) {
-    cancelConcedeButton.addEventListener(
-      "click",
-      () => {
-        hide(
-          document.getElementById(
-            "concedeConfirm"
-          )
-        );
-      }
     );
   }
 }
@@ -3184,8 +4043,6 @@ function initialize() {
   hide(pauseMenu);
   hide(endScreen);
 
-  createDeviceMenu();
-
   if (canvas) {
     canvas.width =
       CANVAS_WIDTH;
@@ -3197,6 +4054,8 @@ function initialize() {
   resetBoostPads();
 
   updateHUD();
+
+  createDeviceMenu();
 
   requestAnimationFrame(
     gameLoop
