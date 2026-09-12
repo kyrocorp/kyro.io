@@ -26,7 +26,7 @@
     turnSpeed: 0.05,
     friction: 0.985,
     boostDrain: 35,
-    boostRegen: 0, // plus de régénération automatique : uniquement via les pads
+    boostRegen: 0,
     collisionRadius: 24
   };
   CAR_CFG.accel = CAR_CFG.maxSpeed / 40;
@@ -81,6 +81,8 @@
   const POINTS_GOAL = 150;
   const POINTS_SAVE = 50;
 
+  const MOVE_DRAG_THRESHOLD = 16; // px avant que le glissement soit pris en compte
+
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
@@ -104,7 +106,7 @@
   const touchInput = { forward: false, backward: false, left: false, right: false, boost: false };
 
   let rebindingAction = null;
-  let settingsOpenedFrom = 'mainMenu'; // 'mainMenu' | 'pauseMenu'
+  let settingsOpenedFrom = 'mainMenu';
 
   let canvas, ctx;
   let running = false;
@@ -115,6 +117,11 @@
   let timerInterval = null;
 
   let world = null;
+
+  // Etat du pavé tactile de déplacement (mobile)
+  let moveTouchId = null;
+  let moveStartX = 0;
+  let moveStartY = 0;
 
   /* =====================================================
      UTILITAIRES
@@ -220,21 +227,33 @@
       #mobileControls {
         position: absolute;
         inset: 0;
-        pointer-events: none;
         z-index: 40;
       }
-      #mobileControls button {
+
+      #mcMoveArea {
         position: absolute;
-        pointer-events: all;
-        width: 64px; height: 64px;
+        inset: 0;
+        touch-action: none;
+        pointer-events: auto;
+      }
+
+      #mcBoost {
+        position: absolute;
+        bottom: 55px;
+        right: 30px;
+        width: 84px;
+        height: 84px;
         border-radius: 50%;
         font-size: 11px;
         padding: 0;
+        pointer-events: auto;
+        z-index: 41;
+        background: rgba(0,150,255,0.12);
       }
-      #mcLeft   { bottom: 30px; left: 30px; }
-      #mcRight  { bottom: 30px; left: 104px; }
-      #mcForward{ bottom: 100px; left: 67px; }
-      #mcBoost  { bottom: 55px; right: 30px; width: 80px; height: 80px; }
+      #mcBoost.active {
+        background: #00bfff;
+        box-shadow: 0 0 25px #00bfff;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -598,6 +617,7 @@
     updateScoreDisplay();
     updateStatsDisplay();
     updatePointsDisplay();
+    updatePauseMenuForMode();
 
     if (deviceType === 'mobile') buildMobileControls();
   }
@@ -628,7 +648,7 @@
   }
 
   /* =====================================================
-     CONTROLES MOBILES
+     CONTROLES MOBILES : pavé tactile invisible
   ===================================================== */
 
   function buildMobileControls() {
@@ -636,25 +656,85 @@
     const div = document.createElement('div');
     div.id = 'mobileControls';
     div.innerHTML = `
-      <button id="mcForward">▲</button>
-      <button id="mcLeft">◀</button>
-      <button id="mcRight">▶</button>
+      <div id="mcMoveArea"></div>
       <button id="mcBoost">BOOST</button>
     `;
     $('arenaContainer').appendChild(div);
 
-    const bind = (id, key) => {
-      const el = $(id);
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); touchInput[key] = true; });
-      el.addEventListener('touchend', (e) => { e.preventDefault(); touchInput[key] = false; });
-      el.addEventListener('mousedown', () => touchInput[key] = true);
-      el.addEventListener('mouseup', () => touchInput[key] = false);
-    };
+    const moveArea = $('mcMoveArea');
+    const boostBtn = $('mcBoost');
 
-    bind('mcForward', 'forward');
-    bind('mcLeft', 'left');
-    bind('mcRight', 'right');
-    bind('mcBoost', 'boost');
+    function resetMoveInput() {
+      touchInput.forward = false;
+      touchInput.backward = false;
+      touchInput.left = false;
+      touchInput.right = false;
+    }
+
+    function updateMoveFromDelta(dx, dy) {
+      touchInput.forward = dx < -MOVE_DRAG_THRESHOLD;
+      touchInput.backward = dx > MOVE_DRAG_THRESHOLD;
+      touchInput.left = dy < -MOVE_DRAG_THRESHOLD;
+      touchInput.right = dy > MOVE_DRAG_THRESHOLD;
+    }
+
+    // --- Support tactile (mobile réel) ---
+    moveArea.addEventListener('touchstart', (e) => {
+      if (moveTouchId !== null) return;
+      const t = e.changedTouches[0];
+      moveTouchId = t.identifier;
+      moveStartX = t.clientX;
+      moveStartY = t.clientY;
+      e.preventDefault();
+    }, { passive: false });
+
+    moveArea.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === moveTouchId) {
+          updateMoveFromDelta(t.clientX - moveStartX, t.clientY - moveStartY);
+          e.preventDefault();
+        }
+      }
+    }, { passive: false });
+
+    function endMoveTouch(e) {
+      for (const t of e.changedTouches) {
+        if (t.identifier === moveTouchId) {
+          moveTouchId = null;
+          resetMoveInput();
+        }
+      }
+    }
+
+    moveArea.addEventListener('touchend', endMoveTouch, { passive: false });
+    moveArea.addEventListener('touchcancel', endMoveTouch, { passive: false });
+
+    // --- Fallback souris (test sur navigateur desktop) ---
+    let mouseDragging = false;
+    moveArea.addEventListener('mousedown', (e) => {
+      mouseDragging = true;
+      moveStartX = e.clientX;
+      moveStartY = e.clientY;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!mouseDragging) return;
+      updateMoveFromDelta(e.clientX - moveStartX, e.clientY - moveStartY);
+    });
+    window.addEventListener('mouseup', () => {
+      if (!mouseDragging) return;
+      mouseDragging = false;
+      resetMoveInput();
+    });
+
+    // --- Bouton boost ---
+    const setBoost = (v) => {
+      touchInput.boost = v;
+      boostBtn.classList.toggle('active', v);
+    };
+    boostBtn.addEventListener('touchstart', (e) => { e.preventDefault(); setBoost(true); }, { passive: false });
+    boostBtn.addEventListener('touchend', (e) => { e.preventDefault(); setBoost(false); }, { passive: false });
+    boostBtn.addEventListener('mousedown', () => setBoost(true));
+    boostBtn.addEventListener('mouseup', () => setBoost(false));
   }
 
   /* =====================================================
@@ -1289,11 +1369,24 @@
     if (paused) show($('pauseMenu')); else hide($('pauseMenu'));
   }
 
+  function updatePauseMenuForMode() {
+    const btn = $('pauseMainMenuButton');
+    if (!btn) return;
+    if (mode === 'online') {
+      hide(btn);
+    } else {
+      show(btn);
+    }
+  }
+
   function initPauseMenu() {
     $('resumeButton').onclick = () => { paused = false; hide($('pauseMenu')); };
     $('pauseSettingsButton').onclick = () => openSettings('pauseMenu');
     $('concedeButton').onclick = () => { hide($('pauseMenu')); show($('concedeConfirm')); };
-    $('pauseMainMenuButton').onclick = () => { returnToMainMenu(); };
+    $('pauseMainMenuButton').onclick = () => {
+      if (mode === 'online') return; // sécurité : impossible en ligne
+      returnToMainMenu();
+    };
 
     $('confirmConcedeButton').onclick = () => {
       hide($('concedeConfirm'));
