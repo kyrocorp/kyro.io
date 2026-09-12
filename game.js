@@ -44,9 +44,18 @@ const defaults = {
 };
 
 let controls = {...defaults};
+
 try {
-  const saved = JSON.parse(localStorage.getItem("turboball-controls") || "null");
-  if (saved && Object.keys(defaults).every(k => typeof saved[k] === "string")) {
+  const saved = JSON.parse(
+    localStorage.getItem("turboball-controls") || "null"
+  );
+
+  if (
+    saved &&
+    Object.keys(defaults).every(
+      k => typeof saved[k] === "string"
+    )
+  ) {
     controls = {...defaults, ...saved};
   }
 } catch {}
@@ -79,17 +88,22 @@ function keyName(key) {
 }
 
 function saveControls() {
-  localStorage.setItem("turboball-controls", JSON.stringify(controls));
+  localStorage.setItem(
+    "turboball-controls",
+    JSON.stringify(controls)
+  );
 }
 
 function updateControlUI() {
   for (const action of Object.keys(keyButtons)) {
     if (keyButtons[action]) {
-      keyButtons[action].textContent = keyName(controls[action]);
+      keyButtons[action].textContent =
+        keyName(controls[action]);
     }
 
     if (howButtons[action]) {
-      howButtons[action].textContent = keyName(controls[action]);
+      howButtons[action].textContent =
+        keyName(controls[action]);
     }
   }
 }
@@ -104,7 +118,9 @@ function controlPressed(action) {
 }
 
 function clearKeys() {
-  for (const k in keys) keys[k] = false;
+  for (const k in keys) {
+    keys[k] = false;
+  }
 }
 
 document.addEventListener("keydown", e => {
@@ -113,26 +129,39 @@ document.addEventListener("keydown", e => {
 
     if (e.key === "Escape") {
       waitingForAction.textContent =
-        keyName(controls[waitingForAction.dataset.action]);
+        keyName(
+          controls[
+            waitingForAction.dataset.action
+          ]
+        );
 
       waitingForAction = null;
       return;
     }
 
-    const action = waitingForAction.dataset.action;
+    const action =
+      waitingForAction.dataset.action;
+
     const newKey = normalizedKey(e);
 
-    if (["p", "escape"].includes(newKey) || newKey === "") {
+    if (
+      ["p", "escape"].includes(newKey) ||
+      newKey === ""
+    ) {
       return;
     }
 
-    const other = Object.keys(controls).find(
-      a => a !== action && controls[a] === newKey
-    );
+    const other =
+      Object.keys(controls).find(
+        a =>
+          a !== action &&
+          controls[a] === newKey
+      );
 
     if (other) return;
 
     controls[action] = newKey;
+
     saveControls();
     updateControlUI();
 
@@ -146,8 +175,29 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
   }
 
-  if (gameRunning && !goalActive && k === "p") {
+  /*
+    P fonctionne aussi avec le code clavier physique,
+    même si la disposition du clavier est différente.
+  */
+  if (
+    gameRunning &&
+    !goalActive &&
+    (k === "p" || e.code === "KeyP")
+  ) {
+    e.preventDefault();
     togglePause();
+    return;
+  }
+
+  /*
+    Empêche les touches de mouvement de rester actives
+    lorsqu'on utilise les menus.
+  */
+  if (
+    !gameRunning ||
+    paused ||
+    goalActive
+  ) {
     return;
   }
 
@@ -158,66 +208,122 @@ document.addEventListener("keyup", e => {
   keys[normalizedKey(e)] = false;
 });
 
-window.addEventListener("blur", clearKeys);
+window.addEventListener(
+  "blur",
+  clearKeys
+);
 
 for (const action of Object.keys(keyButtons)) {
-  keyButtons[action]?.addEventListener("click", () => {
-    if (waitingForAction) return;
+  keyButtons[action]?.addEventListener(
+    "click",
+    () => {
+      if (waitingForAction) return;
 
-    waitingForAction = keyButtons[action];
-    waitingForAction.textContent = "PRESS A KEY";
-  });
+      waitingForAction =
+        keyButtons[action];
+
+      waitingForAction.textContent =
+        "PRESS A KEY";
+    }
+  );
 }
 
-$("resetControlsButton")?.addEventListener("click", () => {
-  controls = {...defaults};
-  saveControls();
-  updateControlUI();
-});
+$("resetControlsButton")?.addEventListener(
+  "click",
+  () => {
+    controls = {...defaults};
+
+    saveControls();
+    updateControlUI();
+  }
+);
 
 $("settingsButton")?.addEventListener(
   "click",
-  () => openSettings("main")
-);
-
-$("pauseSettingsButton")?.addEventListener(
-  "click",
-  () => openSettings("pause")
+  () => {
+    openSettings("main");
+  }
 );
 
 function openSettings(from) {
   settingsReturn = from;
 
-  mainMenu?.classList.add("hidden");
-  howToPlayMenu?.classList.add("hidden");
-  pauseMenu?.classList.add("hidden");
+  clearKeys();
 
-  settingsMenu?.classList.remove("hidden");
+  mainMenu?.classList.add(
+    "hidden"
+  );
+
+  howToPlayMenu?.classList.add(
+    "hidden"
+  );
+
+  pauseMenu?.classList.add(
+    "hidden"
+  );
+
+  concedeConfirm?.classList.add(
+    "hidden"
+  );
+
+  settingsMenu?.classList.remove(
+    "hidden"
+  );
 
   updateControlUI();
 }
 
-$("settingsBackButton")?.addEventListener("click", () => {
-  settingsMenu?.classList.add("hidden");
+$("settingsBackButton")?.addEventListener(
+  "click",
+  () => {
+    settingsMenu?.classList.add(
+      "hidden"
+    );
 
-  if (settingsReturn === "pause" && gameRunning) {
-    pauseMenu?.classList.remove("hidden");
-  } else {
-    mainMenu?.classList.remove("hidden");
+    if (
+      settingsReturn === "pause" &&
+      gameRunning
+    ) {
+      paused = true;
+
+      pauseMenu?.classList.remove(
+        "hidden"
+      );
+    } else {
+      mainMenu?.classList.remove(
+        "hidden"
+      );
+    }
   }
-});
+);
 
-$("howToPlayButton")?.addEventListener("click", () => {
-  mainMenu?.classList.add("hidden");
-  howToPlayMenu?.classList.remove("hidden");
+$("howToPlayButton")?.addEventListener(
+  "click",
+  () => {
+    mainMenu?.classList.add(
+      "hidden"
+    );
 
-  updateControlUI();
-});
+    howToPlayMenu?.classList.remove(
+      "hidden"
+    );
 
-$("backButton")?.addEventListener("click", () => {
-  howToPlayMenu?.classList.add("hidden");
-  mainMenu?.classList.remove("hidden");
-});
+    updateControlUI();
+  }
+);
+
+$("backButton")?.addEventListener(
+  "click",
+  () => {
+    howToPlayMenu?.classList.add(
+      "hidden"
+    );
+
+    mainMenu?.classList.remove(
+      "hidden"
+    );
+  }
+);
 
 let blueScore = 0;
 let orangeScore = 0;
@@ -239,15 +345,21 @@ let saveCooldown = 0;
 let saveDangerHandled = false;
 
 function setText(el, value) {
-  if (el) el.textContent = value;
+  if (el) {
+    el.textContent = value;
+  }
 }
 
 function updatePoints() {
-  setText(playerPointsEl, playerPoints);
+  setText(
+    playerPointsEl,
+    playerPoints
+  );
 }
 
 function awardPoints(amount, reason) {
   playerPoints += amount;
+
   updatePoints();
 
   if (pointsNotification) {
@@ -256,22 +368,36 @@ function awardPoints(amount, reason) {
     pointsNotification.textContent =
       `+${amount} ${reason}`;
 
-    pointsNotification.classList.remove("show");
+    pointsNotification.classList.remove(
+      "show"
+    );
 
     void pointsNotification.offsetWidth;
 
-    pointsNotification.classList.add("show");
+    pointsNotification.classList.add(
+      "show"
+    );
 
-    pointsTimer = setTimeout(() => {
-      pointsNotification.classList.remove("show");
-    }, 1100);
+    pointsTimer = setTimeout(
+      () => {
+        pointsNotification.classList.remove(
+          "show"
+        );
+      },
+      1100
+    );
   }
 
-  pointsPanel?.classList.remove("earned");
+  pointsPanel?.classList.remove(
+    "earned"
+  );
 
   if (pointsPanel) {
     void pointsPanel.offsetWidth;
-    pointsPanel.classList.add("earned");
+
+    pointsPanel.classList.add(
+      "earned"
+    );
   }
 }
 
@@ -282,7 +408,9 @@ function resetPoints() {
 
   updatePoints();
 
-  pointsNotification?.classList.remove("show");
+  pointsNotification?.classList.remove(
+    "show"
+  );
 }
 
 const field = {
@@ -302,7 +430,10 @@ const saveZone = {
   x: field.left + 10,
   y: goal.top + 12,
   width: 145,
-  height: goal.bottom - goal.top - 24
+  height:
+    goal.bottom -
+    goal.top -
+    24
 };
 
 const boostPads = [
@@ -373,7 +504,10 @@ class Car {
     this.x = x;
     this.y = y;
 
-    this.angle = bot ? Math.PI : 0;
+    this.angle =
+      bot
+        ? Math.PI
+        : 0;
 
     this.speed = 0;
 
@@ -393,7 +527,10 @@ class Car {
     this.x = this.startX;
     this.y = this.startY;
 
-    this.angle = this.isBot ? Math.PI : 0;
+    this.angle =
+      this.isBot
+        ? Math.PI
+        : 0;
 
     this.speed = 0;
     this.boost = 100;
@@ -402,6 +539,7 @@ class Car {
     this.ballContact = false;
 
     this.aiTarget = null;
+    this.aiThink = 0;
   }
 
   update() {
@@ -411,31 +549,44 @@ class Car {
       this.updatePlayer();
     }
 
-    this.x += Math.cos(this.angle) * this.speed;
-    this.y += Math.sin(this.angle) * this.speed;
+    this.x +=
+      Math.cos(this.angle) *
+      this.speed;
+
+    this.y +=
+      Math.sin(this.angle) *
+      this.speed;
 
     this.speed *= 0.985;
 
-    if (Math.abs(this.speed) < 0.02) {
+    if (
+      Math.abs(this.speed) <
+      0.02
+    ) {
       this.speed = 0;
     }
 
     this.keepInside();
 
-    this.boost = Math.min(
-      100,
-      this.boost + 0.025
-    );
+    this.boost =
+      Math.min(
+        100,
+        this.boost + 0.025
+      );
   }
 
   updatePlayer() {
     this.boosting = false;
 
-    if (controlPressed("forward")) {
+    if (
+      controlPressed("forward")
+    ) {
       this.speed += 0.18;
     }
 
-    if (controlPressed("reverse")) {
+    if (
+      controlPressed("reverse")
+    ) {
       if (this.speed > 0) {
         this.speed -= 0.25;
       } else {
@@ -446,20 +597,29 @@ class Car {
     const turn =
       0.055 *
       Math.min(
-        Math.abs(this.speed) / 2 + 0.3,
+        Math.abs(this.speed) / 2 +
+          0.3,
         1
       );
 
-    if (controlPressed("left")) {
+    if (
+      controlPressed("left")
+    ) {
       this.angle -=
         turn *
-        (this.speed >= 0 ? 1 : -1);
+        (this.speed >= 0
+          ? 1
+          : -1);
     }
 
-    if (controlPressed("right")) {
+    if (
+      controlPressed("right")
+    ) {
       this.angle +=
         turn *
-        (this.speed >= 0 ? 1 : -1);
+        (this.speed >= 0
+          ? 1
+          : -1);
     }
 
     if (
@@ -472,49 +632,63 @@ class Car {
       this.boosting = true;
     }
 
-    this.speed = Math.max(
-      -3.2,
-      Math.min(
-        this.speed,
-        this.boosting
-          ? this.boostMax
-          : this.maxSpeed
-      )
-    );
+    this.speed =
+      Math.max(
+        -3.2,
+        Math.min(
+          this.speed,
+          this.boosting
+            ? this.boostMax
+            : this.maxSpeed
+        )
+      );
   }
 
   updateAI() {
-    const dxBall = ball.x - this.x;
-    const dyBall = ball.y - this.y;
+    const dxBall =
+      ball.x - this.x;
+
+    const dyBall =
+      ball.y - this.y;
 
     const distBall =
-      Math.hypot(dxBall, dyBall);
+      Math.hypot(
+        dxBall,
+        dyBall
+      );
 
     let tx = ball.x;
     let ty = ball.y;
 
     if (
-      ball.x > field.right - 270 &&
+      ball.x >
+        field.right - 270 &&
       ball.vx > 0
     ) {
-      tx = Math.min(
-        field.right - 55,
-        ball.x + 55
-      );
+      tx =
+        Math.min(
+          field.right - 55,
+          ball.x + 55
+        );
 
       ty =
         H / 2 +
-        (ball.y - H / 2) * 0.7;
+        (ball.y - H / 2) *
+          0.7;
 
-    } else if (ball.x < W * 0.42) {
+    } else if (
+      ball.x < W * 0.42
+    ) {
       tx = ball.x + 45;
       ty = ball.y;
     }
 
-    this.aiThink -= 1 / 60;
+    this.aiThink -=
+      1 / 60;
 
     const dangerous =
-      ball.x > field.right - 270 &&
+      ball.x >
+        field.right - 270 &&
       ball.vx > 0;
 
     if (
@@ -530,8 +704,14 @@ class Car {
         let best = null;
         let bestD = Infinity;
 
-        for (const pad of boostPads) {
-          if (pad.cooldown > 0) continue;
+        for (
+          const pad of boostPads
+        ) {
+          if (
+            pad.cooldown > 0
+          ) {
+            continue;
+          }
 
           const d =
             Math.hypot(
@@ -568,26 +748,36 @@ class Car {
       );
 
     let diff =
-      targetAngle - this.angle;
+      targetAngle -
+      this.angle;
 
-    while (diff > Math.PI) {
-      diff -= Math.PI * 2;
+    while (
+      diff > Math.PI
+    ) {
+      diff -=
+        Math.PI * 2;
     }
 
-    while (diff < -Math.PI) {
-      diff += Math.PI * 2;
+    while (
+      diff < -Math.PI
+    ) {
+      diff +=
+        Math.PI * 2;
     }
 
     const turn = 0.062;
 
     if (diff > 0.06) {
       this.angle += turn;
-    } else if (diff < -0.06) {
+    } else if (
+      diff < -0.06
+    ) {
       this.angle -= turn;
     }
 
     const aligned =
-      Math.abs(diff) < 0.32;
+      Math.abs(diff) <
+      0.32;
 
     const attack =
       ball.x < W * 0.55 &&
@@ -611,23 +801,28 @@ class Car {
       this.boost -= 0.55;
     }
 
-    this.speed = Math.min(
-      this.speed,
-      this.boosting
-        ? 9.6
-        : 6.7
-    );
+    this.speed =
+      Math.min(
+        this.speed,
+        this.boosting
+          ? 9.6
+          : 6.7
+      );
 
     if (this.aiTarget) {
       const d =
         Math.hypot(
-          this.aiTarget.x - this.x,
-          this.aiTarget.y - this.y
+          this.aiTarget.x -
+            this.x,
+          this.aiTarget.y -
+            this.y
         );
 
       if (
-        d < this.radius + 22 &&
-        this.aiTarget.cooldown <= 0
+        d <
+          this.radius + 22 &&
+        this.aiTarget.cooldown <=
+          0
       ) {
         this.boost =
           Math.min(
@@ -635,8 +830,11 @@ class Car {
             this.boost + 25
           );
 
-        this.aiTarget.cooldown = 5;
-        this.aiTarget.flash = 1;
+        this.aiTarget.cooldown =
+          5;
+
+        this.aiTarget.flash =
+          1;
 
         spawnPadParticles(
           this.aiTarget
@@ -648,25 +846,46 @@ class Car {
   }
 
   keepInside() {
-    const r = this.radius;
+    const r =
+      this.radius;
 
-    if (this.x < field.left + r) {
-      this.x = field.left + r;
+    if (
+      this.x <
+      field.left + r
+    ) {
+      this.x =
+        field.left + r;
+
       this.speed *= -0.3;
     }
 
-    if (this.x > field.right - r) {
-      this.x = field.right - r;
+    if (
+      this.x >
+      field.right - r
+    ) {
+      this.x =
+        field.right - r;
+
       this.speed *= -0.3;
     }
 
-    if (this.y < field.top + r) {
-      this.y = field.top + r;
+    if (
+      this.y <
+      field.top + r
+    ) {
+      this.y =
+        field.top + r;
+
       this.speed *= -0.3;
     }
 
-    if (this.y > field.bottom - r) {
-      this.y = field.bottom - r;
+    if (
+      this.y >
+      field.bottom - r
+    ) {
+      this.y =
+        field.bottom - r;
+
       this.speed *= -0.3;
     }
   }
@@ -679,7 +898,9 @@ class Car {
       this.y
     );
 
-    ctx.rotate(this.angle);
+    ctx.rotate(
+      this.angle
+    );
 
     if (this.boosting) {
       ctx.fillStyle =
@@ -687,22 +908,32 @@ class Car {
 
       ctx.beginPath();
 
-      ctx.moveTo(-35, -11);
+      ctx.moveTo(
+        -35,
+        -11
+      );
 
       ctx.lineTo(
-        -65 - Math.random() * 18,
+        -65 -
+          Math.random() * 18,
         0
       );
 
-      ctx.lineTo(-35, 11);
+      ctx.lineTo(
+        -35,
+        11
+      );
 
       ctx.fill();
     }
 
-    ctx.shadowColor = this.color;
+    ctx.shadowColor =
+      this.color;
+
     ctx.shadowBlur = 18;
 
-    ctx.fillStyle = this.color;
+    ctx.fillStyle =
+      this.color;
 
     roundRect(
       -28,
@@ -716,7 +947,8 @@ class Car {
 
     ctx.shadowBlur = 0;
 
-    ctx.fillStyle = "#08101a";
+    ctx.fillStyle =
+      "#08101a";
 
     roundRect(
       -5,
@@ -728,7 +960,8 @@ class Car {
 
     ctx.fill();
 
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle =
+      "#fff";
 
     ctx.fillRect(
       20,
@@ -744,7 +977,8 @@ class Car {
       7
     );
 
-    ctx.fillStyle = "#05070b";
+    ctx.fillStyle =
+      "#05070b";
 
     ctx.fillRect(
       -18,
@@ -807,10 +1041,14 @@ class Ball {
 
     if (s > 9) {
       this.vx =
-        this.vx / s * 9;
+        this.vx /
+        s *
+        9;
 
       this.vy =
-        this.vy / s * 9;
+        this.vy /
+        s *
+        9;
     }
 
     this.checkGoal();
@@ -822,19 +1060,27 @@ class Ball {
 
   checkGoal() {
     const inOpening =
-      this.y + this.radius > goal.top &&
-      this.y - this.radius < goal.bottom;
+      this.y +
+        this.radius >
+        goal.top &&
+      this.y -
+        this.radius <
+        goal.bottom;
 
-    if (!inOpening) return;
+    if (!inOpening) {
+      return;
+    }
 
     if (
-      this.x - this.radius <=
+      this.x -
+        this.radius <=
       field.left - 2
     ) {
       scoreGoal("orange");
 
     } else if (
-      this.x + this.radius >=
+      this.x +
+        this.radius >=
       field.right + 2
     ) {
       scoreGoal("blue");
@@ -843,47 +1089,59 @@ class Ball {
 
   walls() {
     if (
-      this.y - this.radius <
+      this.y -
+        this.radius <
       field.top
     ) {
       this.y =
-        field.top + this.radius;
+        field.top +
+        this.radius;
 
       this.vy *= -0.82;
     }
 
     if (
-      this.y + this.radius >
+      this.y +
+        this.radius >
       field.bottom
     ) {
       this.y =
-        field.bottom - this.radius;
+        field.bottom -
+        this.radius;
 
       this.vy *= -0.82;
     }
 
     const inOpening =
-      this.y + this.radius > goal.top &&
-      this.y - this.radius < goal.bottom;
+      this.y +
+        this.radius >
+        goal.top &&
+      this.y -
+        this.radius <
+        goal.bottom;
 
     if (
-      this.x - this.radius <
+      this.x -
+        this.radius <
         field.left &&
       !inOpening
     ) {
       this.x =
-        field.left + this.radius;
+        field.left +
+        this.radius;
 
       this.vx *= -0.82;
     }
 
     if (
-      this.x + this.radius >
+      this.x +
+        this.radius >
         field.right &&
       !inOpening
     ) {
       this.x =
-        field.right - this.radius;
+        field.right -
+        this.radius;
 
       this.vx *= -0.82;
     }
@@ -922,7 +1180,9 @@ class Ball {
   draw() {
     ctx.save();
 
-    ctx.shadowColor = "#fff";
+    ctx.shadowColor =
+      "#fff";
+
     ctx.shadowBlur = 18;
 
     const g =
@@ -935,9 +1195,20 @@ class Ball {
         this.radius
       );
 
-    g.addColorStop(0, "#fff");
-    g.addColorStop(.55, "#dce7f0");
-    g.addColorStop(1, "#7d91a3");
+    g.addColorStop(
+      0,
+      "#fff"
+    );
+
+    g.addColorStop(
+      .55,
+      "#dce7f0"
+    );
+
+    g.addColorStop(
+      1,
+      "#7d91a3"
+    );
 
     ctx.fillStyle = g;
 
@@ -972,7 +1243,8 @@ const bot =
     true
   );
 
-const ball = new Ball();
+const ball =
+  new Ball();
 
 function playerInSaveZone() {
   return (
@@ -989,11 +1261,16 @@ function playerInSaveZone() {
 
 function ballDangerous() {
   const inLane =
-    ball.y + ball.radius > goal.top &&
-    ball.y - ball.radius < goal.bottom;
+    ball.y +
+      ball.radius >
+      goal.top &&
+    ball.y -
+      ball.radius <
+      goal.bottom;
 
   const close =
-    ball.x < field.left + 250;
+    ball.x <
+    field.left + 250;
 
   return (
     inLane &&
@@ -1014,14 +1291,19 @@ function carBallCollision(car) {
     ball.y - car.y;
 
   const d =
-    Math.hypot(dx, dy);
+    Math.hypot(
+      dx,
+      dy
+    );
 
   const minD =
     car.radius +
     ball.radius;
 
   if (d >= minD) {
-    car.ballContact = false;
+    car.ballContact =
+      false;
+
     return;
   }
 
@@ -1032,7 +1314,8 @@ function carBallCollision(car) {
   const newContact =
     !car.ballContact;
 
-  car.ballContact = true;
+  car.ballContact =
+    true;
 
   if (
     car === player &&
@@ -1064,8 +1347,9 @@ function carBallCollision(car) {
 
   const force =
     Math.min(
-      Math.abs(car.speed) * 1.15 +
-      1.2,
+      Math.abs(car.speed) *
+        1.15 +
+        1.2,
       7
     );
 
@@ -1100,7 +1384,8 @@ function carBallCollision(car) {
     ball.vx =
       Math.max(
         1.8,
-        Math.abs(ball.vx) * 0.65
+        Math.abs(ball.vx) *
+          0.65
       );
 
     ball.vy *= 0.65;
@@ -1120,7 +1405,10 @@ function carCarCollision(a, b) {
     b.y - a.y;
 
   const d =
-    Math.hypot(dx, dy);
+    Math.hypot(
+      dx,
+      dy
+    );
 
   const minD =
     a.radius +
@@ -1143,18 +1431,27 @@ function carCarCollision(a, b) {
     minD - d;
 
   a.x -=
-    nx * overlap / 2;
+    nx *
+    overlap /
+    2;
 
   a.y -=
-    ny * overlap / 2;
+    ny *
+    overlap /
+    2;
 
   b.x +=
-    nx * overlap / 2;
+    nx *
+    overlap /
+    2;
 
   b.y +=
-    ny * overlap / 2;
+    ny *
+    overlap /
+    2;
 
-  const av = a.speed;
+  const av =
+    a.speed;
 
   a.speed =
     b.speed * 0.55;
@@ -1167,22 +1464,35 @@ function carCarCollision(a, b) {
 }
 
 function spawnPadParticles(pad) {
-  for (let i = 0; i < 10; i++) {
+  for (
+    let i = 0;
+    i < 10;
+    i++
+  ) {
     const a =
-      Math.PI * 2 * i / 10;
+      Math.PI *
+      2 *
+      i /
+      10;
 
     const s =
       1.2 +
-      Math.random() * 1.4;
+      Math.random() *
+      1.4;
 
     boostParticles.push({
       x: pad.x,
       y: pad.y,
-      vx: Math.cos(a) * s,
-      vy: Math.sin(a) * s,
+      vx:
+        Math.cos(a) * s,
+      vy:
+        Math.sin(a) * s,
       life: 0.55,
-      size: 2 + Math.random() * 2,
-      color: pad.color
+      size:
+        2 +
+        Math.random() * 2,
+      color:
+        pad.color
     });
   }
 }
@@ -1193,22 +1503,32 @@ function spawnGoalParticles(team) {
       ? "#43d9ff"
       : "#ff9d2e";
 
-  for (let i = 0; i < 32; i++) {
+  for (
+    let i = 0;
+    i < 32;
+    i++
+  ) {
     const a =
       Math.random() *
-      Math.PI * 2;
+      Math.PI *
+      2;
 
     const s =
       1.5 +
-      Math.random() * 3.5;
+      Math.random() *
+      3.5;
 
     goalParticles.push({
       x: W / 2,
       y: H / 2,
-      vx: Math.cos(a) * s,
-      vy: Math.sin(a) * s,
+      vx:
+        Math.cos(a) * s,
+      vy:
+        Math.sin(a) * s,
       life: 1.1,
-      size: 2 + Math.random() * 4,
+      size:
+        2 +
+        Math.random() * 4,
       color
     });
   }
@@ -1225,7 +1545,7 @@ function updateEffects(dt) {
     Math.max(
       0,
       goalFlash -
-      sec * 2.2
+        sec * 2.2
     );
 
   for (
@@ -1234,7 +1554,9 @@ function updateEffects(dt) {
       goalParticles
     ]
   ) {
-    for (const p of list) {
+    for (
+      const p of list
+    ) {
       p.x += p.vx;
       p.y += p.vy;
 
@@ -1245,12 +1567,18 @@ function updateEffects(dt) {
     }
 
     for (
-      let i = list.length - 1;
+      let i =
+        list.length - 1;
       i >= 0;
       i--
     ) {
-      if (list[i].life <= 0) {
-        list.splice(i, 1);
+      if (
+        list[i].life <= 0
+      ) {
+        list.splice(
+          i,
+          1
+        );
       }
     }
   }
@@ -1262,7 +1590,8 @@ function updateEffects(dt) {
     );
 
   if (!ballDangerous()) {
-    saveDangerHandled = false;
+    saveDangerHandled =
+      false;
   }
 }
 
@@ -1273,7 +1602,9 @@ function updateBoostPads(dt) {
       0.1
     );
 
-  for (const p of boostPads) {
+  for (
+    const p of boostPads
+  ) {
     p.cooldown =
       Math.max(
         0,
@@ -1286,7 +1617,8 @@ function updateBoostPads(dt) {
     p.flash =
       Math.max(
         0,
-        p.flash - sec * 2.5
+        p.flash -
+          sec * 2.5
       );
   }
 
@@ -1298,8 +1630,14 @@ function updateBoostPads(dt) {
     return;
   }
 
-  for (const p of boostPads) {
-    if (p.cooldown > 0) continue;
+  for (
+    const p of boostPads
+  ) {
+    if (
+      p.cooldown > 0
+    ) {
+      continue;
+    }
 
     if (
       Math.hypot(
@@ -1334,7 +1672,14 @@ function scoreGoal(team) {
 
   clearKeys();
 
-  // Réinitialisation immédiate des voitures et de la balle après le but.
+  /*
+    RESET IMMÉDIAT APRÈS LE BUT
+
+    La voiture du joueur,
+    la voiture adverse et la balle
+    reviennent immédiatement à leur
+    position de départ.
+  */
   resetPositions();
 
   goalFlash = 1;
@@ -1403,14 +1748,19 @@ function scoreGoal(team) {
     "hidden"
   );
 
-  goalTimer =
-    setTimeout(() => {
-      goalMessage?.classList.add(
-        "hidden"
-      );
+  clearTimeout(goalTimer);
 
-      startCountdown();
-    }, 1800);
+  goalTimer =
+    setTimeout(
+      () => {
+        goalMessage?.classList.add(
+          "hidden"
+        );
+
+        startCountdown();
+      },
+      1800
+    );
 }
 
 function resetPositions() {
@@ -1418,7 +1768,8 @@ function resetPositions() {
   bot.reset();
   ball.reset();
 
-  saveDangerHandled = false;
+  saveDangerHandled =
+    false;
 }
 
 function startCountdown() {
@@ -1444,37 +1795,43 @@ function startCountdown() {
   );
 
   countdownTimer =
-    setInterval(() => {
-      count--;
+    setInterval(
+      () => {
+        count--;
 
-      if (count > 0) {
-        setText(
-          countdownEl,
-          count
-        );
+        if (count > 0) {
+          setText(
+            countdownEl,
+            count
+          );
 
-      } else {
-        clearInterval(
-          countdownTimer
-        );
+        } else {
+          clearInterval(
+            countdownTimer
+          );
 
-        countdownTimer = null;
+          countdownTimer = null;
 
-        setText(
-          countdownEl,
-          "GO!"
-        );
+          setText(
+            countdownEl,
+            "GO!"
+          );
 
-        countdownFinish =
-          setTimeout(() => {
-            countdownEl?.classList.add(
-              "hidden"
+          countdownFinish =
+            setTimeout(
+              () => {
+                countdownEl?.classList.add(
+                  "hidden"
+                );
+
+                goalActive = false;
+              },
+              700
             );
-
-            goalActive = false;
-          }, 700);
-      }
-    }, 1000);
+        }
+      },
+      1000
+    );
 }
 
 function updateTimer(dt) {
@@ -1489,7 +1846,9 @@ function updateTimer(dt) {
   gameTime -=
     dt / 1000;
 
-  if (gameTime <= 0) {
+  if (
+    gameTime <= 0
+  ) {
     gameTime = 0;
 
     updateTimerDisplay();
@@ -1519,7 +1878,9 @@ function updateTimerDisplay() {
   );
 }
 
-function endMatch(conceded = false) {
+function endMatch(
+  conceded = false
+) {
   if (
     !gameRunning &&
     !conceded
@@ -1661,7 +2022,9 @@ function startMatch() {
 
   goalFlash = 0;
 
-  for (const p of boostPads) {
+  for (
+    const p of boostPads
+  ) {
     p.cooldown = 0;
     p.flash = 0;
   }
@@ -1689,6 +2052,10 @@ function startMatch() {
 
   resetPositions();
 
+  /*
+    Affiche bien le jeu lorsque
+    la partie commence.
+  */
   gameWrapper?.classList.remove(
     "hidden"
   );
@@ -1722,15 +2089,20 @@ function startMatch() {
   );
 
   introTimer =
-    setTimeout(() => {
-      if (!gameRunning) return;
+    setTimeout(
+      () => {
+        if (!gameRunning) {
+          return;
+        }
 
-      matchIntro?.classList.add(
-        "hidden"
-      );
+        matchIntro?.classList.add(
+          "hidden"
+        );
 
-      startCountdown();
-    }, 900);
+        startCountdown();
+      },
+      900
+    );
 }
 
 function showMainMenu() {
@@ -1790,6 +2162,10 @@ function showMainMenu() {
     "hidden"
   );
 
+  /*
+    Cache complètement le jeu
+    quand on retourne au menu principal.
+  */
   gameWrapper?.classList.add(
     "hidden"
   );
@@ -1811,6 +2187,14 @@ function togglePause() {
 
   clearKeys();
 
+  concedeConfirm?.classList.add(
+    "hidden"
+  );
+
+  settingsMenu?.classList.add(
+    "hidden"
+  );
+
   if (paused) {
     pauseMenu?.classList.remove(
       "hidden"
@@ -1829,11 +2213,21 @@ function togglePause() {
 $("resumeButton")?.addEventListener(
   "click",
   () => {
-    if (!gameRunning) return;
+    if (!gameRunning) {
+      return;
+    }
 
     paused = false;
 
     clearKeys();
+
+    concedeConfirm?.classList.add(
+      "hidden"
+    );
+
+    settingsMenu?.classList.add(
+      "hidden"
+    );
 
     pauseMenu?.classList.add(
       "hidden"
@@ -1848,7 +2242,11 @@ $("resumeButton")?.addEventListener(
 $("pauseSettingsButton")?.addEventListener(
   "click",
   () => {
-    if (!gameRunning) return;
+    if (!gameRunning) {
+      return;
+    }
+
+    paused = true;
 
     openSettings("pause");
   }
@@ -1861,7 +2259,11 @@ $("pauseSettingsButton")?.addEventListener(
 $("concedeButton")?.addEventListener(
   "click",
   () => {
-    if (!gameRunning) return;
+    if (!gameRunning) {
+      return;
+    }
+
+    clearKeys();
 
     concedeConfirm?.classList.remove(
       "hidden"
@@ -1880,7 +2282,10 @@ $("cancelConcedeButton")?.addEventListener(
       "hidden"
     );
 
-    if (paused && gameRunning) {
+    if (
+      paused &&
+      gameRunning
+    ) {
       pauseMenu?.classList.remove(
         "hidden"
       );
@@ -1939,7 +2344,8 @@ $("restartButton")?.addEventListener(
 );
 
 function drawArena() {
-  ctx.fillStyle = "#06131f";
+  ctx.fillStyle =
+    "#06131f";
 
   ctx.fillRect(
     0,
@@ -2001,8 +2407,10 @@ function drawArena() {
   ctx.strokeRect(
     field.left,
     field.top,
-    field.right - field.left,
-    field.bottom - field.top
+    field.right -
+      field.left,
+    field.bottom -
+      field.top
   );
 
   ctx.beginPath();
@@ -2057,10 +2465,12 @@ function drawArena() {
     "#00aaff";
 
   ctx.strokeRect(
-    field.left - goal.depth,
+    field.left -
+      goal.depth,
     goal.top,
     goal.depth,
-    goal.bottom - goal.top
+    goal.bottom -
+      goal.top
   );
 
   ctx.strokeStyle =
@@ -2073,7 +2483,8 @@ function drawArena() {
     field.right,
     goal.top,
     goal.depth,
-    goal.bottom - goal.top
+    goal.bottom -
+      goal.top
   );
 
   ctx.shadowBlur = 0;
@@ -2082,13 +2493,17 @@ function drawArena() {
 }
 
 function drawBoostPads() {
-  for (const p of boostPads) {
+  for (
+    const p of boostPads
+  ) {
     const available =
       p.cooldown <= 0;
 
     const pulse =
       1 +
-      Math.sin(p.pulse) *
+      Math.sin(
+        p.pulse
+      ) *
       0.08;
 
     ctx.save();
@@ -2178,7 +2593,7 @@ function drawBoostPads() {
         0,
         32 +
           (1 - p.flash) *
-          18,
+            18,
         0,
         Math.PI * 2
       );
@@ -2195,7 +2610,9 @@ function drawBoostPads() {
 }
 
 function drawParticles(list) {
-  for (const p of list) {
+  for (
+    const p of list
+  ) {
     ctx.save();
 
     ctx.globalAlpha =
@@ -2236,7 +2653,9 @@ function drawGoalEffects() {
     goalParticles
   );
 
-  if (goalFlash > 0) {
+  if (
+    goalFlash > 0
+  ) {
     ctx.save();
 
     ctx.globalAlpha =
@@ -2279,13 +2698,17 @@ function updateHUD() {
       ? Math.round(
           Math.min(
             83,
-            s * (83 / 11.7)
+            s *
+              (83 /
+                11.7)
           )
         )
       : Math.round(
           Math.min(
             51,
-            s * (51 / 7.2)
+            s *
+              (51 /
+                7.2)
           )
         );
 
@@ -2382,8 +2805,13 @@ function gameLoop(now) {
     ball.update();
 
     if (!goalActive) {
-      carBallCollision(player);
-      carBallCollision(bot);
+      carBallCollision(
+        player
+      );
+
+      carBallCollision(
+        bot
+      );
 
       carCarCollision(
         player,
