@@ -35,6 +35,59 @@ const GOAL_TOP = 230;
 const GOAL_BOTTOM = 470;
 const GOAL_DEPTH = 70;
 
+/* Serveur WebSocket */
+
+const SERVER_URL = "wss://kyro-io.onrender.com";
+
+/* Boost pads */
+
+const BOOST_PAD_AMOUNT = 100;
+const BOOST_PAD_RESPAWN_TIME = 5000;
+
+const BOOST_PADS = [
+  {
+    x: 110,
+    y: 110,
+    active: true,
+    respawnAt: 0
+  },
+  {
+    x: 110,
+    y: CANVAS_HEIGHT - 110,
+    active: true,
+    respawnAt: 0
+  },
+  {
+    x: CANVAS_WIDTH - 110,
+    y: 110,
+    active: true,
+    respawnAt: 0
+  },
+  {
+    x: CANVAS_WIDTH - 110,
+    y: CANVAS_HEIGHT - 110,
+    active: true,
+    respawnAt: 0
+  },
+  {
+    x: CANVAS_WIDTH / 2,
+    y: 75,
+    active: true,
+    respawnAt: 0
+  },
+  {
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT - 75,
+    active: true,
+    respawnAt: 0
+  }
+];
+
+/* Zones de save invisibles */
+
+const SAVE_ZONE_WIDTH = 95;
+const SAVE_ZONE_HEIGHT = GOAL_BOTTOM - GOAL_TOP + 70;
+
 const DEFAULT_CONTROLS = {
   forward: "z",
   reverse: "s",
@@ -92,7 +145,11 @@ const gameState = {
 
   goalInProgress: false,
 
-  matchMode: "offline"
+  matchMode: "offline",
+
+  lastBallTouchBy: null,
+
+  lastSaveBy: null
 };
 
 /* =========================================================
@@ -186,7 +243,9 @@ const opponent = {
 
   speed: 0,
 
-  team: "orange"
+  team: "orange",
+
+  remoteInput: null
 };
 
 const bot = {
@@ -371,6 +430,7 @@ function buildMainMenu() {
   if (!mainMenu) return;
 
   mainMenu.className = "menu-screen";
+
   mainMenu.innerHTML = `
     <div class="menu-background"></div>
 
@@ -402,8 +462,6 @@ function buildMainMenu() {
         "
       >
 
-        <!-- LEFT -->
-
         <div>
 
           <button
@@ -421,8 +479,6 @@ function buildMainMenu() {
           </button>
 
         </div>
-
-        <!-- RIGHT -->
 
         <div>
 
@@ -476,6 +532,13 @@ function buildMainMenu() {
 
 function openShop() {
   hide(mainMenu);
+
+  const existing =
+    document.getElementById("shopMenu");
+
+  if (existing) {
+    existing.remove();
+  }
 
   const shop = document.createElement("div");
 
@@ -706,6 +769,9 @@ function startOfflineMatch() {
   gameState.mode = "offline";
   gameState.matchMode = "offline";
 
+  player.team = "blue";
+  opponent.team = "orange";
+
   hide(mainMenu);
 
   resetMatch();
@@ -722,16 +788,7 @@ function startOfflineMatch() {
 ========================================================= */
 
 function getWebSocketURL() {
-  const protocol =
-    location.protocol === "https:"
-      ? "wss:"
-      : "ws:";
-
-  return (
-    protocol +
-    "//" +
-    location.host
-  );
+  return SERVER_URL;
 }
 
 function startOnlineSearch() {
@@ -962,6 +1019,14 @@ function handleMatchFound(data) {
   gameState.isHost =
     data.isHost;
 
+  player.team =
+    data.team || "blue";
+
+  opponent.team =
+    player.team === "blue"
+      ? "orange"
+      : "blue";
+
   resetMatch();
 
   hide(
@@ -1118,6 +1183,41 @@ function handleRemoteGameState(state) {
       state.timeRemaining;
   }
 
+  if (
+    typeof state.opponentX === "number"
+  ) {
+    opponent.x =
+      state.opponentX;
+  }
+
+  if (
+    typeof state.opponentY === "number"
+  ) {
+    opponent.y =
+      state.opponentY;
+  }
+
+  if (
+    typeof state.opponentVX === "number"
+  ) {
+    opponent.vx =
+      state.opponentVX;
+  }
+
+  if (
+    typeof state.opponentVY === "number"
+  ) {
+    opponent.vy =
+      state.opponentVY;
+  }
+
+  if (
+    typeof state.opponentAngle === "number"
+  ) {
+    opponent.angle =
+      state.opponentAngle;
+  }
+
   updateHUD();
 }
 
@@ -1170,7 +1270,22 @@ function sendGameState() {
         gameState.orangeScore,
 
       timeRemaining:
-        gameState.timeRemaining
+        gameState.timeRemaining,
+
+      opponentX:
+        opponent.x,
+
+      opponentY:
+        opponent.y,
+
+      opponentVX:
+        opponent.vx,
+
+      opponentVY:
+        opponent.vy,
+
+      opponentAngle:
+        opponent.angle
     }
   });
 }
@@ -1248,6 +1363,57 @@ function startCountdown() {
 }
 
 /* =========================================================
+   RESET BOOST PADS
+========================================================= */
+
+function resetBoostPads() {
+  BOOST_PADS.forEach(pad => {
+    pad.active = true;
+    pad.respawnAt = 0;
+  });
+}
+
+function updateBoostPads() {
+  const now = Date.now();
+
+  BOOST_PADS.forEach(pad => {
+    if (
+      !pad.active &&
+      now >= pad.respawnAt
+    ) {
+      pad.active = true;
+      pad.respawnAt = 0;
+    }
+  });
+}
+
+function collectBoostPad(car) {
+  BOOST_PADS.forEach(pad => {
+    if (!pad.active) return;
+
+    const dist =
+      Math.hypot(
+        car.x - pad.x,
+        car.y - pad.y
+      );
+
+    if (dist > 32) return;
+
+    car.boost =
+      Math.min(
+        BOOST_MAX,
+        car.boost + BOOST_PAD_AMOUNT
+      );
+
+    pad.active = false;
+
+    pad.respawnAt =
+      Date.now() +
+      BOOST_PAD_RESPAWN_TIME;
+  });
+}
+
+/* =========================================================
    MATCH RESET
 ========================================================= */
 
@@ -1268,23 +1434,48 @@ function resetMatch() {
 
   gameState.goalInProgress = false;
 
-  player.x = 300;
+  gameState.lastBallTouchBy = null;
+  gameState.lastSaveBy = null;
+
+  player.x =
+    player.team === "orange"
+      ? 900
+      : 300;
+
   player.y =
     CANVAS_HEIGHT / 2;
 
   player.vx = 0;
   player.vy = 0;
-  player.angle = 0;
-  player.boost = BOOST_MAX;
 
-  opponent.x = 900;
+  player.angle =
+    player.team === "orange"
+      ? Math.PI
+      : 0;
+
+  player.boost =
+    BOOST_MAX;
+
+  opponent.x =
+    player.team === "orange"
+      ? 300
+      : 900;
+
   opponent.y =
     CANVAS_HEIGHT / 2;
 
   opponent.vx = 0;
   opponent.vy = 0;
-  opponent.angle = Math.PI;
-  opponent.boost = BOOST_MAX;
+
+  opponent.angle =
+    player.team === "orange"
+      ? 0
+      : Math.PI;
+
+  opponent.boost =
+    BOOST_MAX;
+
+  opponent.remoteInput = null;
 
   bot.x = 900;
   bot.y =
@@ -1292,10 +1483,16 @@ function resetMatch() {
 
   bot.vx = 0;
   bot.vy = 0;
-  bot.angle = Math.PI;
-  bot.boost = BOOST_MAX;
+
+  bot.angle =
+    Math.PI;
+
+  bot.boost =
+    BOOST_MAX;
 
   resetBall();
+
+  resetBoostPads();
 
   updateHUD();
 
@@ -1434,6 +1631,8 @@ function updatePlayer() {
   player.y += player.vy;
 
   keepCarInsideField(player);
+
+  collectBoostPad(player);
 
   player.speed =
     Math.hypot(
@@ -1588,6 +1787,8 @@ function updateBot() {
 
   keepCarInsideField(bot);
 
+  collectBoostPad(bot);
+
   bot.speed =
     Math.hypot(
       bot.vx,
@@ -1693,6 +1894,8 @@ function updateOnlineOpponent() {
     opponent.vy;
 
   keepCarInsideField(opponent);
+
+  collectBoostPad(opponent);
 }
 
 /* =========================================================
@@ -1707,10 +1910,10 @@ function updateBall() {
   ball.vy *= 0.992;
 
   if (
-    ball.y - BALL_RADIUS < 0
+    ball.y - BALL_RADIUS < 20
   ) {
     ball.y =
-      BALL_RADIUS;
+      20 + BALL_RADIUS;
 
     ball.vy =
       Math.abs(ball.vy);
@@ -1718,10 +1921,11 @@ function updateBall() {
 
   if (
     ball.y + BALL_RADIUS >
-    CANVAS_HEIGHT
+    CANVAS_HEIGHT - 20
   ) {
     ball.y =
       CANVAS_HEIGHT -
+      20 -
       BALL_RADIUS;
 
     ball.vy =
@@ -1733,7 +1937,7 @@ function updateBall() {
     ball.y <= GOAL_BOTTOM;
 
   if (
-    ball.x - BALL_RADIUS < 0
+    ball.x - BALL_RADIUS < 20
   ) {
     if (inGoalOpening) {
       scoreGoal("orange");
@@ -1741,7 +1945,7 @@ function updateBall() {
     }
 
     ball.x =
-      BALL_RADIUS;
+      20 + BALL_RADIUS;
 
     ball.vx =
       Math.abs(ball.vx);
@@ -1749,7 +1953,7 @@ function updateBall() {
 
   if (
     ball.x + BALL_RADIUS >
-    CANVAS_WIDTH
+    CANVAS_WIDTH - 20
   ) {
     if (inGoalOpening) {
       scoreGoal("blue");
@@ -1758,6 +1962,7 @@ function updateBall() {
 
     ball.x =
       CANVAS_WIDTH -
+      20 -
       BALL_RADIUS;
 
     ball.vx =
@@ -1765,6 +1970,99 @@ function updateBall() {
   }
 
   limitBallSpeed();
+}
+
+/* =========================================================
+   SAVE ZONES
+========================================================= */
+
+function isInsideSaveZone(car, team) {
+  if (team === "blue") {
+    return (
+      car.x >= 20 &&
+      car.x <=
+        20 + SAVE_ZONE_WIDTH &&
+      car.y >=
+        GOAL_TOP - 35 &&
+      car.y <=
+        GOAL_BOTTOM + 35
+    );
+  }
+
+  return (
+    car.x >=
+      CANVAS_WIDTH -
+      20 -
+      SAVE_ZONE_WIDTH &&
+    car.x <=
+      CANVAS_WIDTH - 20 &&
+    car.y >=
+      GOAL_TOP - 35 &&
+    car.y <=
+      GOAL_BOTTOM + 35
+  );
+}
+
+function checkForSave(car, team) {
+  if (
+    gameState.lastBallTouchBy === car
+  ) {
+    return;
+  }
+
+  if (
+    !isInsideSaveZone(car, team)
+  ) {
+    return;
+  }
+
+  const ballHeadingTowardGoal =
+    team === "blue"
+      ? ball.vx < 0
+      : ball.vx > 0;
+
+  if (!ballHeadingTowardGoal) {
+    return;
+  }
+
+  const dist =
+    distance(car, ball);
+
+  if (
+    dist >
+    PLAYER_RADIUS +
+    BALL_RADIUS +
+    25
+  ) {
+    return;
+  }
+
+  if (
+    gameState.lastSaveBy === car
+  ) {
+    return;
+  }
+
+  gameState.lastSaveBy = car;
+
+  addPoints(
+    50,
+    car === player
+  );
+
+  if (car === player) {
+    createPointNotification(
+      "+50 SAVE"
+    );
+  }
+
+  setTimeout(() => {
+    if (
+      gameState.lastSaveBy === car
+    ) {
+      gameState.lastSaveBy = null;
+    }
+  }, 500);
 }
 
 /* =========================================================
@@ -1827,7 +2125,13 @@ function collideCarWithBall(car, team) {
 
   limitBallSpeed();
 
-  addPoints(2, car === player);
+  gameState.lastBallTouchBy =
+    car;
+
+  addPoints(
+    2,
+    car === player
+  );
 
   if (
     car === player
@@ -1836,6 +2140,11 @@ function collideCarWithBall(car, team) {
       "+2 BALL TOUCH"
     );
   }
+
+  checkForSave(
+    car,
+    team
+  );
 }
 
 /* =========================================================
@@ -1864,6 +2173,12 @@ function scoreGoal(team) {
     team === player.team
   );
 
+  if (team === player.team) {
+    createPointNotification(
+      "+150 GOAL"
+    );
+  }
+
   showGoalOverlay(team);
 
   updateHUD();
@@ -1877,6 +2192,9 @@ function scoreGoal(team) {
 
   setTimeout(() => {
     resetBall();
+
+    gameState.lastBallTouchBy = null;
+    gameState.lastSaveBy = null;
 
     gameState.goalInProgress = false;
 
@@ -2191,7 +2509,7 @@ function drawField() {
     CANVAS_HEIGHT
   );
 
-  /* Background */
+  /* Fond */
 
   ctx.fillStyle =
     "#071421";
@@ -2203,7 +2521,7 @@ function drawField() {
     CANVAS_HEIGHT
   );
 
-  /* Field lines */
+  /* Bordure */
 
   ctx.strokeStyle =
     "rgba(120,210,255,0.25)";
@@ -2217,7 +2535,7 @@ function drawField() {
     CANVAS_HEIGHT - 40
   );
 
-  /* Center line */
+  /* Ligne centrale */
 
   ctx.beginPath();
 
@@ -2233,7 +2551,7 @@ function drawField() {
 
   ctx.stroke();
 
-  /* Center circle */
+  /* Cercle central */
 
   ctx.beginPath();
 
@@ -2247,7 +2565,56 @@ function drawField() {
 
   ctx.stroke();
 
-  /* Goals */
+  /* Petit cercle central */
+
+  ctx.beginPath();
+
+  ctx.arc(
+    CANVAS_WIDTH / 2,
+    CANVAS_HEIGHT / 2,
+    8,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle =
+    "rgba(255,255,255,0.7)";
+
+  ctx.fill();
+
+  /* Ligne de surface gauche */
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    160,
+    20
+  );
+
+  ctx.lineTo(
+    160,
+    CANVAS_HEIGHT - 20
+  );
+
+  ctx.stroke();
+
+  /* Ligne de surface droite */
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    CANVAS_WIDTH - 160,
+    20
+  );
+
+  ctx.lineTo(
+    CANVAS_WIDTH - 160,
+    CANVAS_HEIGHT - 20
+  );
+
+  ctx.stroke();
+
+  /* Cage gauche */
 
   ctx.fillStyle =
     "rgba(40,200,255,0.08)";
@@ -2259,6 +2626,18 @@ function drawField() {
     GOAL_BOTTOM - GOAL_TOP
   );
 
+  ctx.strokeStyle =
+    "rgba(40,200,255,0.6)";
+
+  ctx.strokeRect(
+    0,
+    GOAL_TOP,
+    GOAL_DEPTH,
+    GOAL_BOTTOM - GOAL_TOP
+  );
+
+  /* Cage droite */
+
   ctx.fillStyle =
     "rgba(255,130,30,0.08)";
 
@@ -2268,6 +2647,76 @@ function drawField() {
     GOAL_DEPTH,
     GOAL_BOTTOM - GOAL_TOP
   );
+
+  ctx.strokeStyle =
+    "rgba(255,130,30,0.6)";
+
+  ctx.strokeRect(
+    CANVAS_WIDTH - GOAL_DEPTH,
+    GOAL_TOP,
+    GOAL_DEPTH,
+    GOAL_BOTTOM - GOAL_TOP
+  );
+
+  drawBoostPads();
+}
+
+/* =========================================================
+   DRAW BOOST PADS
+========================================================= */
+
+function drawBoostPads() {
+  BOOST_PADS.forEach(pad => {
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.arc(
+      pad.x,
+      pad.y,
+      18,
+      0,
+      Math.PI * 2
+    );
+
+    if (pad.active) {
+      ctx.fillStyle =
+        "#baff35";
+
+      ctx.shadowBlur = 20;
+      ctx.shadowColor =
+        "#8cff00";
+
+      ctx.fill();
+
+      ctx.beginPath();
+
+      ctx.arc(
+        pad.x,
+        pad.y,
+        8,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle =
+        "#ffffff";
+
+      ctx.fill();
+    } else {
+      ctx.fillStyle =
+        "rgba(80,90,100,0.35)";
+
+      ctx.fill();
+
+      ctx.strokeStyle =
+        "rgba(150,160,170,0.25)";
+
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  });
 }
 
 /* =========================================================
@@ -2361,6 +2810,39 @@ function drawCar(car) {
     20
   );
 
+  /* Roues */
+
+  ctx.fillStyle =
+    "#111111";
+
+  ctx.fillRect(
+    -20,
+    -19,
+    12,
+    6
+  );
+
+  ctx.fillRect(
+    8,
+    -19,
+    12,
+    6
+  );
+
+  ctx.fillRect(
+    -20,
+    13,
+    12,
+    6
+  );
+
+  ctx.fillRect(
+    8,
+    13,
+    12,
+    6
+  );
+
   ctx.restore();
 }
 
@@ -2397,12 +2879,15 @@ function update(delta) {
     return;
   }
 
+  updateBoostPads();
+
   updatePlayer();
 
   if (
     gameState.mode === "offline"
   ) {
     updateBot();
+
     collideCarWithBall(
       bot,
       "orange"
@@ -2415,19 +2900,29 @@ function update(delta) {
 
   updateBall();
 
-  collideCarWithBall(
-    player,
-    "blue"
-  );
-
   if (
     gameState.mode === "online"
   ) {
     collideCarWithBall(
       opponent,
-      "orange"
+      opponent.team
+    );
+
+    checkForSave(
+      opponent,
+      opponent.team
     );
   }
+
+  collideCarWithBall(
+    player,
+    player.team
+  );
+
+  checkForSave(
+    player,
+    player.team
+  );
 
   updateTimer(delta);
 }
@@ -2698,6 +3193,8 @@ function initialize() {
     canvas.height =
       CANVAS_HEIGHT;
   }
+
+  resetBoostPads();
 
   updateHUD();
 
