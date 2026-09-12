@@ -6,6 +6,7 @@
   ===================================================== */
 
   const SERVER_URL = 'wss://kyro-io.onrender.com';
+  const ADMIN_CODE = 'TURBO2026';
 
   const FIELD = {
     w: 1200,
@@ -81,14 +82,14 @@
   const POINTS_GOAL = 150;
   const POINTS_SAVE = 50;
 
-  const MOVE_MAX_DRAG = 100; // px de glissement pour atteindre 100% de l'input
+  const MOVE_MAX_DRAG = 100;
 
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
 
   let deviceType = null;
-  let mode = null; // 'online' | 'offline' | 'freeplay'
+  let mode = null;
   let ws = null;
   let myPlayerNumber = null;
   let isHost = false;
@@ -123,6 +124,12 @@
   let moveTouchId = null;
   let moveStartX = 0;
   let moveStartY = 0;
+
+  // Admin
+  let isAdmin = false;
+  let shopItems = [];
+  let notifications = [];
+  let lastSeenNotifCount = 0;
 
   /* =====================================================
      UTILITAIRES
@@ -176,6 +183,28 @@
         letter-spacing: 2px;
         padding: 40px 0;
       }
+      #shopMenu .shop-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 20px 0;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      #shopMenu .shop-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        font-size: 12px;
+      }
+      #shopMenu .shop-item .item-price {
+        color: #baff35;
+        font-weight: bold;
+      }
 
       #searchingOverlay {
         position: fixed;
@@ -220,9 +249,7 @@
         letter-spacing: 1.5px;
         color: #91a2b4;
       }
-      #statsBar .statsColumn b {
-        margin-left: 4px;
-      }
+      #statsBar .statsColumn b { margin-left: 4px; }
       #statsBar .statsColumn.blue b { color: #43d9ff; }
       #statsBar .statsColumn.orange b { color: #ff9d2e; }
       #statsBar .statsColumn.orange { justify-content: flex-end; margin-left: auto; }
@@ -232,14 +259,12 @@
         inset: 0;
         z-index: 40;
       }
-
       #mcMoveArea {
         position: absolute;
         inset: 0;
         touch-action: none;
         pointer-events: auto;
       }
-
       #mcBoost {
         position: absolute;
         bottom: 55px;
@@ -277,6 +302,134 @@
         accent-color: #00bfff;
         cursor: pointer;
       }
+
+      /* ===== ADMIN ===== */
+
+      #adminToggleBtn, #adminPanelBtn, #mailboxBtn {
+        position: fixed;
+        top: 14px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        padding: 0;
+        font-size: 15px;
+        line-height: 1;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(90, 200, 255, 0.4);
+        background: rgba(4, 10, 20, 0.85);
+      }
+      #adminToggleBtn { right: 14px; }
+      #adminPanelBtn { right: 58px; font-size: 9px; letter-spacing: 0; width: auto; padding: 0 10px; border-radius: 18px; }
+      #mailboxBtn { left: 14px; }
+      #mailboxBtn .badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #ff5b3d;
+        color: white;
+        font-size: 9px;
+        border-radius: 50%;
+        min-width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 3px;
+      }
+
+      #adminCodeModal, #adminPanelModal, #mailboxModal {
+        position: fixed;
+        inset: 0;
+        z-index: 2100;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: rgba(0,0,0,0.75);
+        backdrop-filter: blur(6px);
+      }
+
+      #adminCodeModal .panel, #adminPanelModal .panel, #mailboxModal .panel {
+        width: min(500px, 90vw);
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 35px;
+      }
+
+      .admin-section {
+        text-align: left;
+        margin-top: 25px;
+        padding-top: 20px;
+        border-top: 1px solid rgba(255,255,255,0.08);
+      }
+      .admin-section h3 {
+        color: #42cfff;
+        font-size: 14px;
+        letter-spacing: 2px;
+        margin-bottom: 15px;
+      }
+      .admin-section input, .admin-section select, .admin-section textarea {
+        width: 100%;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 6px;
+        color: white;
+        font-family: inherit;
+        font-size: 12px;
+      }
+      .admin-section textarea { resize: vertical; min-height: 60px; }
+
+      .live-count-box {
+        text-align: center;
+        padding: 14px;
+        margin-top: 10px;
+        background: rgba(0,150,255,0.08);
+        border: 1px solid rgba(0,180,255,0.25);
+        border-radius: 8px;
+      }
+      .live-count-box .count {
+        font-size: 30px;
+        font-weight: 900;
+        color: #43d9ff;
+      }
+
+      .notif-item {
+        text-align: left;
+        padding: 14px;
+        margin-bottom: 10px;
+        background: rgba(255,255,255,0.04);
+        border-left: 3px solid #43d9ff;
+        border-radius: 4px;
+      }
+      .notif-item.announcement { border-left-color: #ff9d2e; }
+      .notif-item .notif-meta {
+        font-size: 9px;
+        color: #7d8ca0;
+        letter-spacing: 1px;
+        margin-bottom: 5px;
+      }
+      .notif-item .notif-title {
+        font-size: 13px;
+        color: white;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      .notif-item .notif-body {
+        font-size: 11px;
+        color: #b9c8d8;
+        line-height: 1.5;
+      }
+      .notif-empty {
+        text-align: center;
+        color: #7d8ca0;
+        font-size: 12px;
+        padding: 30px 0;
+        letter-spacing: 1px;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -308,6 +461,273 @@
       </div>
     `;
     topBar.insertAdjacentElement('afterend', div);
+  }
+
+  /* =====================================================
+     ADMIN : chargement/sauvegarde locales
+  ===================================================== */
+
+  function loadAdminData() {
+    try {
+      shopItems = JSON.parse(localStorage.getItem('turboball_shop_items')) || [];
+    } catch (e) { shopItems = []; }
+    try {
+      notifications = JSON.parse(localStorage.getItem('turboball_notifications')) || [];
+    } catch (e) { notifications = []; }
+    try {
+      lastSeenNotifCount = parseInt(localStorage.getItem('turboball_notif_seen') || '0', 10);
+    } catch (e) { lastSeenNotifCount = 0; }
+  }
+
+  function saveShopItems() {
+    localStorage.setItem('turboball_shop_items', JSON.stringify(shopItems));
+  }
+
+  function saveNotifications() {
+    localStorage.setItem('turboball_notifications', JSON.stringify(notifications));
+  }
+
+  /* =====================================================
+     ADMIN : boutons flottants (code + panel + boîte aux lettres)
+  ===================================================== */
+
+  function injectAdminUI() {
+    const adminBtn = document.createElement('button');
+    adminBtn.id = 'adminToggleBtn';
+    adminBtn.className = 'secondary-button';
+    adminBtn.textContent = '⚙';
+    document.body.appendChild(adminBtn);
+
+    const panelBtn = document.createElement('button');
+    panelBtn.id = 'adminPanelBtn';
+    panelBtn.className = 'secondary-button hidden';
+    panelBtn.textContent = 'PANEL ADMIN';
+    document.body.appendChild(panelBtn);
+
+    const mailboxBtn = document.createElement('button');
+    mailboxBtn.id = 'mailboxBtn';
+    mailboxBtn.className = 'secondary-button';
+    mailboxBtn.innerHTML = '✉<span class="badge hidden" id="mailboxBadge">0</span>';
+    document.body.appendChild(mailboxBtn);
+
+    adminBtn.onclick = () => {
+      if (isAdmin) {
+        isAdmin = false;
+        hide(panelBtn);
+        adminBtn.textContent = '⚙';
+        return;
+      }
+      openAdminCodeModal();
+    };
+
+    panelBtn.onclick = openAdminPanel;
+    mailboxBtn.onclick = openMailbox;
+
+    updateMailboxBadge();
+  }
+
+  function openAdminCodeModal() {
+    const div = document.createElement('div');
+    div.id = 'adminCodeModal';
+    div.innerHTML = `
+      <div class="panel">
+        <h2>ACCÈS ADMIN</h2>
+        <div class="admin-section" style="border-top:none; margin-top:15px; padding-top:0;">
+          <input type="password" id="adminCodeInput" placeholder="Entrez le code">
+          <button id="adminCodeSubmit" class="main-button" style="width:100%;">VALIDER</button>
+          <button id="adminCodeCancel" class="secondary-button" style="width:100%; margin-top:8px;">ANNULER</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    const close = () => div.remove();
+
+    $('adminCodeCancel', div) || (div.querySelector('#adminCodeCancel').onclick = close);
+    div.querySelector('#adminCodeCancel').onclick = close;
+
+    div.querySelector('#adminCodeSubmit').onclick = () => {
+      const val = div.querySelector('#adminCodeInput').value;
+      if (val === ADMIN_CODE) {
+        isAdmin = true;
+        $('adminToggleBtn').textContent = '✓';
+        show($('adminPanelBtn'));
+        close();
+      } else {
+        div.querySelector('#adminCodeInput').style.borderColor = '#ff5b3d';
+        div.querySelector('#adminCodeInput').value = '';
+        div.querySelector('#adminCodeInput').placeholder = 'Code incorrect, réessayez';
+      }
+    };
+
+    div.querySelector('#adminCodeInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') div.querySelector('#adminCodeSubmit').click();
+    });
+  }
+
+  function openAdminPanel() {
+    const div = document.createElement('div');
+    div.id = 'adminPanelModal';
+    div.innerHTML = `
+      <div class="panel">
+        <h2>PANEL ADMIN</h2>
+
+        <div class="admin-section">
+          <h3>AJOUTER UN ARTICLE À LA BOUTIQUE</h3>
+          <input type="text" id="shopItemName" placeholder="Nom de l'article">
+          <input type="number" id="shopItemPrice" placeholder="Prix (points)">
+          <button id="addShopItemBtn" class="main-button" style="width:100%;">AJOUTER</button>
+        </div>
+
+        <div class="admin-section">
+          <h3>ENVOYER UNE NOTIFICATION</h3>
+          <select id="notifType">
+            <option value="update">MISE À JOUR</option>
+            <option value="announcement">ANNONCE</option>
+          </select>
+          <input type="text" id="notifTitle" placeholder="Titre">
+          <textarea id="notifBody" placeholder="Message"></textarea>
+          <button id="sendNotifBtn" class="main-button" style="width:100%;">ENVOYER</button>
+        </div>
+
+        <div class="admin-section">
+          <h3>PARTIES EN LIGNE EN DIRECT</h3>
+          <div class="live-count-box">
+            <div class="count" id="liveMatchCount">...</div>
+            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">PARTIES ACTIVES</div>
+          </div>
+          <button id="refreshLiveCountBtn" class="secondary-button" style="width:100%; margin-top:10px;">ACTUALISER</button>
+        </div>
+
+        <button id="adminPanelCloseBtn" class="secondary-button" style="width:100%; margin-top:25px;">FERMER</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    div.querySelector('#addShopItemBtn').onclick = () => {
+      const name = div.querySelector('#shopItemName').value.trim();
+      const price = parseInt(div.querySelector('#shopItemPrice').value, 10);
+      if (!name || isNaN(price)) return;
+      shopItems.push({ id: 'item_' + Date.now(), name, price });
+      saveShopItems();
+      div.querySelector('#shopItemName').value = '';
+      div.querySelector('#shopItemPrice').value = '';
+    };
+
+    div.querySelector('#sendNotifBtn').onclick = () => {
+      const type = div.querySelector('#notifType').value;
+      const title = div.querySelector('#notifTitle').value.trim();
+      const body = div.querySelector('#notifBody').value.trim();
+      if (!title || !body) return;
+      notifications.unshift({
+        id: 'notif_' + Date.now(),
+        type,
+        sender: type === 'update' ? 'ÉQUIPE TURBOBALL — MISE À JOUR' : 'ÉQUIPE TURBOBALL — ANNONCE',
+        title,
+        body,
+        date: new Date().toLocaleString('fr-FR')
+      });
+      saveNotifications();
+      updateMailboxBadge();
+      div.querySelector('#notifTitle').value = '';
+      div.querySelector('#notifBody').value = '';
+    };
+
+    div.querySelector('#refreshLiveCountBtn').onclick = () => refreshLiveMatchCount(div);
+    div.querySelector('#adminPanelCloseBtn').onclick = () => div.remove();
+
+    refreshLiveMatchCount(div);
+  }
+
+  function refreshLiveMatchCount(panelEl) {
+    const countEl = panelEl.querySelector('#liveMatchCount');
+    countEl.textContent = '...';
+    fetchLiveMatchCount((count) => {
+      countEl.textContent = count === null ? 'N/A' : count;
+    });
+  }
+
+  function fetchLiveMatchCount(callback) {
+    try {
+      const statsWs = new WebSocket(SERVER_URL);
+      let done = false;
+
+      statsWs.onopen = () => {
+        statsWs.send(JSON.stringify({ type: 'admin-stats' }));
+      };
+
+      statsWs.onmessage = (event) => {
+        let data;
+        try { data = JSON.parse(event.data); } catch (e) { return; }
+        if (data.type === 'admin-stats') {
+          done = true;
+          callback(typeof data.matchCount === 'number' ? data.matchCount : null);
+          statsWs.close();
+        }
+      };
+
+      statsWs.onerror = () => {
+        if (!done) { done = true; callback(null); }
+      };
+
+      setTimeout(() => {
+        if (!done) {
+          done = true;
+          callback(null);
+          try { statsWs.close(); } catch (e) {}
+        }
+      }, 3000);
+    } catch (e) {
+      callback(null);
+    }
+  }
+
+  /* =====================================================
+     BOÎTE AUX LETTRES (notifications)
+  ===================================================== */
+
+  function updateMailboxBadge() {
+    const badge = $('mailboxBadge');
+    if (!badge) return;
+    const unread = notifications.length - lastSeenNotifCount;
+    if (unread > 0) {
+      badge.textContent = unread;
+      show(badge);
+    } else {
+      hide(badge);
+    }
+  }
+
+  function openMailbox() {
+    const div = document.createElement('div');
+    div.id = 'mailboxModal';
+
+    let listHtml = '<div class="notif-empty">AUCUNE NOTIFICATION POUR L\'INSTANT</div>';
+    if (notifications.length > 0) {
+      listHtml = notifications.map(n => `
+        <div class="notif-item ${n.type === 'announcement' ? 'announcement' : ''}">
+          <div class="notif-meta">${n.sender} · ${n.date}</div>
+          <div class="notif-title">${n.title}</div>
+          <div class="notif-body">${n.body}</div>
+        </div>
+      `).join('');
+    }
+
+    div.innerHTML = `
+      <div class="panel">
+        <h2>BOÎTE AUX LETTRES</h2>
+        <div style="margin-top:20px;">${listHtml}</div>
+        <button id="mailboxCloseBtn" class="secondary-button" style="width:100%; margin-top:20px;">FERMER</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    div.querySelector('#mailboxCloseBtn').onclick = () => {
+      div.remove();
+      lastSeenNotifCount = notifications.length;
+      localStorage.setItem('turboball_notif_seen', String(lastSeenNotifCount));
+      updateMailboxBadge();
+    };
   }
 
   /* =====================================================
@@ -466,7 +886,7 @@
     div.innerHTML = `
       <div class="panel">
         <h2>BOUTIQUE</h2>
-        <div class="shop-empty">RIEN POUR L'INSTANT</div>
+        <div id="shopContent"></div>
         <button id="shopBackButton" class="secondary-button">BACK</button>
       </div>
     `;
@@ -477,7 +897,23 @@
     };
   }
 
+  function renderShopItems() {
+    const content = $('shopContent');
+    if (!content) return;
+    if (shopItems.length === 0) {
+      content.innerHTML = '<div class="shop-empty">RIEN POUR L\'INSTANT</div>';
+      return;
+    }
+    content.innerHTML = '<div class="shop-list">' + shopItems.map(item => `
+      <div class="shop-item">
+        <span>${item.name}</span>
+        <span class="item-price">${item.price} PTS</span>
+      </div>
+    `).join('') + '</div>';
+  }
+
   function openShop() {
+    renderShopItems();
     hide($('mainMenu'));
     show($('shopMenu'));
   }
@@ -752,13 +1188,6 @@
       touchInput.steer = 0;
     }
 
-    // Le glissement du doigt est traité comme un joystick analogique :
-    // - glisser à gauche  -> avance (throttle positif), proportionnel à la distance
-    // - glisser à droite  -> recule (throttle négatif)
-    // - glisser vers le haut   -> tourne à gauche (steer négatif)
-    // - glisser vers le bas    -> tourne à droite (steer positif)
-    // La force appliquée dépend toujours de l'angle actuel de la voiture
-    // (gérée dans updateCar), donc ça s'adapte automatiquement à son orientation.
     function updateMoveFromDelta(dx, dy) {
       touchInput.throttle = clamp(-dx / MOVE_MAX_DRAG, -1, 1);
       touchInput.steer = clamp(dy / MOVE_MAX_DRAG, -1, 1);
@@ -794,7 +1223,6 @@
     moveArea.addEventListener('touchend', endMoveTouch, { passive: false });
     moveArea.addEventListener('touchcancel', endMoveTouch, { passive: false });
 
-    // Fallback souris (tests sur navigateur desktop)
     let mouseDragging = false;
     moveArea.addEventListener('mousedown', (e) => {
       mouseDragging = true;
@@ -1475,7 +1903,6 @@
       show(mainMenuBtn);
       show(cheatBtn);
     } else {
-      // offline (1v1 vs bot)
       show(concedeBtn);
       show(mainMenuBtn);
       hide(cheatBtn);
@@ -1483,7 +1910,6 @@
   }
 
   function initPauseMenu() {
-    // Bouton "SETTINGS TRICHE" injecté juste après le bouton concède
     const cheatBtn = document.createElement('button');
     cheatBtn.id = 'cheatSettingsMenuButton';
     cheatBtn.className = 'hidden';
@@ -1571,9 +1997,11 @@
 
   function init() {
     loadControls();
+    loadAdminData();
     injectDynamicStyles();
     injectBallSpeedDisplay();
     injectStatsBar();
+    injectAdminUI();
     hide($('mainMenu'));
     buildShopMenu();
     buildCheatSettingsMenu();
