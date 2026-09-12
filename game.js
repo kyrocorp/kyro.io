@@ -14,7 +14,6 @@
     goalDepth: 22
   };
 
-  // Conversion km/h <-> unités du jeu
   const PX_PER_METER = 50;
   function kmhToPxFrame(kmh) { return (kmh / 3.6) * PX_PER_METER / 60; }
   function speedToKmh(pxFrame) { return (pxFrame * 60 / PX_PER_METER) * 3.6; }
@@ -22,8 +21,8 @@
   const CAR_CFG = {
     width: 46,
     height: 26,
-    maxSpeed: kmhToPxFrame(51),        // ~11.81
-    maxSpeedBoost: kmhToPxFrame(83),   // ~19.21
+    maxSpeed: kmhToPxFrame(36),        // voitures ralenties (avant: 51)
+    maxSpeedBoost: kmhToPxFrame(58),   // voitures ralenties (avant: 83)
     turnSpeed: 0.05,
     friction: 0.985,
     boostDrain: 35,
@@ -40,30 +39,48 @@
     radius: 16,
     friction: 0.992,
     wallBounce: 0.75,
-    maxSpeed: kmhToPxFrame(216) // ~50
+    maxSpeed: kmhToPxFrame(216)
   };
 
   const MATCH_DURATION = 120;
 
   const BOOST_PAD_RADIUS = 20;
-  const BOOST_PAD_COOLDOWN = 5; // secondes
+  const BOOST_PAD_COOLDOWN = 5;
 
   function makeBoostPads() {
     return [
-      // 3 à gauche
       { x: 55, y: 150, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
       { x: 55, y: 350, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
       { x: 55, y: 550, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
-      // 3 à droite
       { x: FIELD.w - 55, y: 150, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
       { x: FIELD.w - 55, y: 350, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
       { x: FIELD.w - 55, y: 550, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
-      // haut milieu
       { x: FIELD.w / 2, y: 55, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
-      // bas milieu
       { x: FIELD.w / 2, y: FIELD.h - 55, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 }
     ];
   }
+
+  // Zone invisible de "save" devant chaque but
+  const SAVE_ZONE_DEPTH = 160;
+  const SAVE_ZONE_MARGIN = 50;
+
+  function getSaveZone(team) {
+    const yMin = FIELD.h / 2 - FIELD.goalHeight / 2 - SAVE_ZONE_MARGIN;
+    const yMax = FIELD.h / 2 + FIELD.goalHeight / 2 + SAVE_ZONE_MARGIN;
+    if (team === 'blue') {
+      return { xMin: FIELD.goalDepth, xMax: FIELD.goalDepth + SAVE_ZONE_DEPTH, yMin, yMax };
+    }
+    return { xMin: FIELD.w - FIELD.goalDepth - SAVE_ZONE_DEPTH, xMax: FIELD.w - FIELD.goalDepth, yMin, yMax };
+  }
+
+  function isInOwnSaveZone(car) {
+    const z = getSaveZone(car.team);
+    return car.x >= z.xMin && car.x <= z.xMax && car.y >= z.yMin && car.y <= z.yMax;
+  }
+
+  const POINTS_TOUCH = 2;
+  const POINTS_GOAL = 150;
+  const POINTS_SAVE = 50;
 
   /* =====================================================
      ETAT GLOBAL
@@ -118,6 +135,8 @@
 
   function show(el) { el.classList.remove('hidden'); }
   function hide(el) { el.classList.add('hidden'); }
+
+  function teamOfPlayer(num) { return num === 1 ? 'blue' : 'orange'; }
 
   /* =====================================================
      STYLES DYNAMIQUES
@@ -178,6 +197,26 @@
         text-shadow: 0 0 10px rgba(255, 200, 50, 0.7);
       }
 
+      #statsBar {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 30px;
+        gap: 20px;
+      }
+      #statsBar .statsColumn {
+        display: flex;
+        gap: 16px;
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        color: #91a2b4;
+      }
+      #statsBar .statsColumn b {
+        margin-left: 4px;
+      }
+      #statsBar .statsColumn.blue b { color: #43d9ff; }
+      #statsBar .statsColumn.orange b { color: #ff9d2e; }
+      #statsBar .statsColumn.orange { justify-content: flex-end; margin-left: auto; }
+
       #mobileControls {
         position: absolute;
         inset: 0;
@@ -206,8 +245,27 @@
     const span = document.createElement('span');
     span.id = 'ballSpeedNumber';
     span.textContent = 'BALL: 0 KM/H';
-    const scoreEl = $('orangeScore');
-    orangeTeamEl.insertBefore(span, scoreEl);
+    orangeTeamEl.appendChild(span); // à DROITE du score orange
+  }
+
+  function injectStatsBar() {
+    const topBar = $('topBar');
+    if (!topBar || $('statsBar')) return;
+    const div = document.createElement('div');
+    div.id = 'statsBar';
+    div.innerHTML = `
+      <div class="statsColumn blue">
+        <span>BUTS<b id="statBlueGoals">0</b></span>
+        <span>TOUCHES<b id="statBlueTouches">0</b></span>
+        <span>SAVES<b id="statBlueSaves">0</b></span>
+      </div>
+      <div class="statsColumn orange">
+        <span>SAVES<b id="statOrangeSaves">0</b></span>
+        <span>TOUCHES<b id="statOrangeTouches">0</b></span>
+        <span>BUTS<b id="statOrangeGoals">0</b></span>
+      </div>
+    `;
+    topBar.insertAdjacentElement('afterend', div);
   }
 
   /* =====================================================
@@ -500,7 +558,8 @@
       boosting: false,
       speed: 0,
       exploded: false,
-      explodeTimer: 0
+      explodeTimer: 0,
+      wasTouching: false
     };
   }
 
@@ -518,12 +577,18 @@
       scoreOrange: 0,
       frozen: false,
       boostPads: makeBoostPads(),
-      particles: []
+      particles: [],
+      stats: {
+        blue: { goals: 0, touches: 0, saves: 0, points: 0 },
+        orange: { goals: 0, touches: 0, saves: 0, points: 0 }
+      }
     };
 
     matchTimeLeft = MATCH_DURATION;
     updateTimerDisplay();
     updateScoreDisplay();
+    updateStatsDisplay();
+    updatePointsDisplay();
 
     if (deviceType === 'mobile') buildMobileControls();
   }
@@ -667,6 +732,7 @@
       car.vx = 0;
       car.vy = 0;
       car.speed = 0;
+      car.wasTouching = false;
     });
     world.ball.x = FIELD.w / 2;
     world.ball.y = FIELD.h / 2;
@@ -704,7 +770,6 @@
       return;
     }
 
-    // Collision normale : on repousse les voitures
     const nx = dx / dist;
     const ny = dy / dist;
     const overlap = minDist - dist;
@@ -820,15 +885,32 @@
     }
   }
 
+  function registerTouch(car) {
+    const stats = world.stats[car.team];
+    if (isInOwnSaveZone(car)) {
+      stats.saves++;
+      stats.points += POINTS_SAVE;
+    } else {
+      stats.touches++;
+      stats.points += POINTS_TOUCH;
+    }
+    updateStatsDisplay();
+    updatePointsDisplay();
+  }
+
   function carBallCollision(car, ball) {
-    if (car.exploded) return;
+    if (car.exploded) {
+      car.wasTouching = false;
+      return;
+    }
 
     const dx = ball.x - car.x;
     const dy = ball.y - car.y;
     const dist = Math.hypot(dx, dy);
     const minDist = BALL_CFG.radius + CAR_CFG.collisionRadius;
+    const touching = dist < minDist;
 
-    if (dist < minDist && dist > 0) {
+    if (touching && dist > 0) {
       const nx = dx / dist;
       const ny = dy / dist;
       const overlap = minDist - dist;
@@ -839,7 +921,13 @@
       const impactForce = Math.hypot(car.vx, car.vy) * 1.4 + 3;
       ball.vx += nx * impactForce;
       ball.vy += ny * impactForce;
+
+      if (!car.wasTouching) {
+        registerTouch(car);
+      }
     }
+
+    car.wasTouching = touching;
   }
 
   function checkGoal() {
@@ -860,7 +948,13 @@
     if (scoringTeam === 'blue') world.scoreBlue++;
     else world.scoreOrange++;
 
+    world.stats[scoringTeam].goals++;
+    world.stats[scoringTeam].points += POINTS_GOAL;
+
     updateScoreDisplay();
+    updateStatsDisplay();
+    updatePointsDisplay();
+
     world.frozen = true;
     resetCarsAndBallForGoal();
 
@@ -960,7 +1054,8 @@
                 scoreOrange: world.scoreOrange,
                 timeLeft: matchTimeLeft,
                 frozen: world.frozen,
-                boostPads: world.boostPads
+                boostPads: world.boostPads,
+                stats: world.stats
               }
             }));
           }
@@ -990,8 +1085,11 @@
     matchTimeLeft = state.timeLeft;
     world.frozen = state.frozen;
     world.boostPads = state.boostPads;
+    world.stats = state.stats;
     updateScoreDisplay();
     updateTimerDisplay();
+    updateStatsDisplay();
+    updatePointsDisplay();
   }
 
   function stopGameLoop() {
@@ -1059,7 +1157,6 @@
     const mainColor = car.team === 'blue' ? '#43d9ff' : '#ff9d2e';
     const darkColor = car.team === 'blue' ? '#1f6fa0' : '#a5560f';
 
-    // Flamme de boost
     if (car.boosting) {
       ctx.beginPath();
       ctx.moveTo(-CAR_CFG.width / 2, -6);
@@ -1073,14 +1170,12 @@
       ctx.shadowBlur = 0;
     }
 
-    // Roues
     ctx.fillStyle = '#111';
     ctx.fillRect(-CAR_CFG.width / 2 + 3, -CAR_CFG.height / 2 - 3, 10, 4);
     ctx.fillRect(-CAR_CFG.width / 2 + 3, CAR_CFG.height / 2 - 1, 10, 4);
     ctx.fillRect(CAR_CFG.width / 2 - 13, -CAR_CFG.height / 2 - 3, 10, 4);
     ctx.fillRect(CAR_CFG.width / 2 - 13, CAR_CFG.height / 2 - 1, 10, 4);
 
-    // Corps
     ctx.fillStyle = mainColor;
     ctx.shadowColor = mainColor;
     ctx.shadowBlur = 12;
@@ -1094,11 +1189,9 @@
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Bande sombre
     ctx.fillStyle = darkColor;
     ctx.fillRect(-CAR_CFG.width / 2 + 4, -3, CAR_CFG.width - 14, 6);
 
-    // Cockpit
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.beginPath();
     ctx.ellipse(2, 0, 8, CAR_CFG.height / 2 - 6, 0, 0, Math.PI * 2);
@@ -1154,6 +1247,22 @@
   function updateScoreDisplay() {
     $('blueScore').textContent = world.scoreBlue;
     $('orangeScore').textContent = world.scoreOrange;
+  }
+
+  function updateStatsDisplay() {
+    if (!world) return;
+    $('statBlueGoals').textContent = world.stats.blue.goals;
+    $('statBlueTouches').textContent = world.stats.blue.touches;
+    $('statBlueSaves').textContent = world.stats.blue.saves;
+    $('statOrangeGoals').textContent = world.stats.orange.goals;
+    $('statOrangeTouches').textContent = world.stats.orange.touches;
+    $('statOrangeSaves').textContent = world.stats.orange.saves;
+  }
+
+  function updatePointsDisplay() {
+    if (!world || !myPlayerNumber) return;
+    const myTeam = teamOfPlayer(myPlayerNumber);
+    $('playerPoints').textContent = world.stats[myTeam].points;
   }
 
   function updateTimerDisplay() {
@@ -1251,6 +1360,7 @@
     loadControls();
     injectDynamicStyles();
     injectBallSpeedDisplay();
+    injectStatsBar();
     hide($('mainMenu'));
     buildShopMenu();
     buildSearchingOverlay();
