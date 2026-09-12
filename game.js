@@ -2,7 +2,7 @@
   'use strict';
 
   /* =====================================================
-     CONFIG (valeurs par défaut, à ajuster selon tes specs)
+     CONFIG
   ===================================================== */
 
   const SERVER_URL = 'wss://kyro-io.onrender.com';
@@ -14,34 +14,63 @@
     goalDepth: 22
   };
 
+  // Conversion km/h <-> unités du jeu
+  const PX_PER_METER = 50;
+  function kmhToPxFrame(kmh) { return (kmh / 3.6) * PX_PER_METER / 60; }
+  function speedToKmh(pxFrame) { return (pxFrame * 60 / PX_PER_METER) * 3.6; }
+
   const CAR_CFG = {
     width: 46,
     height: 26,
-    accel: 0.35,
-    reverseAccel: 0.22,
-    maxSpeed: 7.5,
-    maxSpeedBoost: 12,
-    turnSpeed: 0.045,
+    maxSpeed: kmhToPxFrame(51),        // ~11.81
+    maxSpeedBoost: kmhToPxFrame(83),   // ~19.21
+    turnSpeed: 0.05,
     friction: 0.985,
-    boostDrain: 35,   // par seconde
-    boostRegen: 12    // par seconde
+    boostDrain: 35,
+    boostRegen: 10,
+    collisionRadius: 24
   };
+  CAR_CFG.accel = CAR_CFG.maxSpeed / 40;
+  CAR_CFG.boostThrustMult = CAR_CFG.maxSpeedBoost / CAR_CFG.maxSpeed;
+  CAR_CFG.reverseAccel = CAR_CFG.accel * 0.6;
+
+  const EXPLOSION_THRESHOLD_KMH = 70;
 
   const BALL_CFG = {
     radius: 16,
     friction: 0.992,
     wallBounce: 0.75,
-    maxSpeed: 16
+    maxSpeed: kmhToPxFrame(216) // ~50
   };
 
-  const MATCH_DURATION = 120; // secondes
+  const MATCH_DURATION = 120;
+
+  const BOOST_PAD_RADIUS = 20;
+  const BOOST_PAD_COOLDOWN = 5; // secondes
+
+  function makeBoostPads() {
+    return [
+      // 3 à gauche
+      { x: 55, y: 150, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      { x: 55, y: 350, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      { x: 55, y: 550, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      // 3 à droite
+      { x: FIELD.w - 55, y: 150, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      { x: FIELD.w - 55, y: 350, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      { x: FIELD.w - 55, y: 550, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      // haut milieu
+      { x: FIELD.w / 2, y: 55, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 },
+      // bas milieu
+      { x: FIELD.w / 2, y: FIELD.h - 55, radius: BOOST_PAD_RADIUS, active: true, cooldown: 0 }
+    ];
+  }
 
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
 
-  let deviceType = null; // 'pc' | 'mobile'
-  let mode = null;       // 'online' | 'offline'
+  let deviceType = null;
+  let mode = null;
   let ws = null;
   let myPlayerNumber = null;
   let isHost = false;
@@ -68,7 +97,7 @@
   let matchTimeLeft = MATCH_DURATION;
   let timerInterval = null;
 
-  let world = null; // { cars: [car1, car2], ball, scoreBlue, scoreOrange }
+  let world = null;
 
   /* =====================================================
      UTILITAIRES
@@ -91,7 +120,7 @@
   function hide(el) { el.classList.add('hidden'); }
 
   /* =====================================================
-     STYLES INJECTES (pour les nouveaux éléments de menu)
+     STYLES DYNAMIQUES
   ===================================================== */
 
   function injectDynamicStyles() {
@@ -142,6 +171,13 @@
       }
       @keyframes spin { to { transform: rotate(360deg); } }
 
+      #ballSpeedNumber {
+        color: #ffd35c;
+        font-size: 13px;
+        margin-left: 10px;
+        text-shadow: 0 0 10px rgba(255, 200, 50, 0.7);
+      }
+
       #mobileControls {
         position: absolute;
         inset: 0;
@@ -159,10 +195,19 @@
       #mcLeft   { bottom: 30px; left: 30px; }
       #mcRight  { bottom: 30px; left: 104px; }
       #mcForward{ bottom: 100px; left: 67px; }
-      #mcBack   { bottom: 30px; left: 67px; opacity: 0.001; width:0; height:0; }
       #mcBoost  { bottom: 55px; right: 30px; width: 80px; height: 80px; }
     `;
     document.head.appendChild(style);
+  }
+
+  function injectBallSpeedDisplay() {
+    const orangeTeamEl = document.querySelector('#scoreboard .team.orange');
+    if (!orangeTeamEl) return;
+    const span = document.createElement('span');
+    span.id = 'ballSpeedNumber';
+    span.textContent = 'BALL: 0 KM/H';
+    const scoreEl = $('orangeScore');
+    orangeTeamEl.insertBefore(span, scoreEl);
   }
 
   /* =====================================================
@@ -200,7 +245,7 @@
   }
 
   /* =====================================================
-     MENU PRINCIPAL (2 colonnes)
+     MENU PRINCIPAL
   ===================================================== */
 
   function buildMainMenu() {
@@ -237,7 +282,7 @@
   }
 
   /* =====================================================
-     SETTINGS (rebind ZQSD) - réutilise le HTML existant
+     SETTINGS
   ===================================================== */
 
   function refreshSettingsLabels() {
@@ -300,7 +345,7 @@
   }
 
   /* =====================================================
-     BOUTIQUE (placeholder)
+     BOUTIQUE
   ===================================================== */
 
   function buildShopMenu() {
@@ -327,7 +372,7 @@
   }
 
   /* =====================================================
-     ECRAN DE RECHERCHE (matchmaking en ligne)
+     RECHERCHE DE MATCH
   ===================================================== */
 
   function buildSearchingOverlay() {
@@ -368,7 +413,6 @@
       return;
     }
 
-    // mode online
     show($('searchingOverlay'));
     ws = new WebSocket(SERVER_URL);
 
@@ -383,20 +427,12 @@
     };
 
     ws.onclose = () => {
-      if (running) {
-        endMatchDueToDisconnect();
-      }
+      if (running) endMatchDueToDisconnect();
     };
   }
 
   function handleServerMessage(data) {
     switch (data.type) {
-      case 'connected':
-        break;
-
-      case 'searching':
-        break;
-
       case 'match-found':
         matchId = data.matchId;
         myPlayerNumber = data.playerNumber;
@@ -407,14 +443,12 @@
 
       case 'opponent-input':
         if (isHost && world) {
-          applyInputToCar(world.cars[1], data.input);
+          world.cars[1]._pendingInput = data.input;
         }
         break;
 
       case 'game-state':
-        if (!isHost && world) {
-          applyRemoteState(data.state);
-        }
+        if (!isHost && world) applyRemoteState(data.state);
         break;
 
       case 'opponent-left':
@@ -429,7 +463,7 @@
   }
 
   /* =====================================================
-     INTRO DE MATCH + COMPTE A REBOURS
+     INTRO + COMPTE A REBOURS
   ===================================================== */
 
   function launchMatchIntro() {
@@ -437,34 +471,36 @@
     setTimeout(() => {
       hide($('matchIntro'));
       setupWorld();
-      runCountdown(3, () => {
-        beginPlay();
-      });
+      runCountdown(3, () => { beginPlay(); });
     }, 1800);
   }
 
   function runCountdown(n, onDone) {
     const el = $('countdown');
-    show(el);
-    el.textContent = n;
     if (n <= 0) {
       hide(el);
       onDone();
       return;
     }
+    show(el);
+    el.textContent = n;
     setTimeout(() => runCountdown(n - 1, onDone), 800);
   }
 
   /* =====================================================
-     MONDE / OBJETS DU JEU
+     MONDE
   ===================================================== */
 
   function makeCar(x, y, angle, team) {
     return {
       x, y, angle, team,
+      startX: x, startY: y, startAngle: angle,
       vx: 0, vy: 0,
       boost: 100,
-      boosting: false
+      boosting: false,
+      speed: 0,
+      exploded: false,
+      explodeTimer: 0
     };
   }
 
@@ -479,7 +515,10 @@
       ],
       ball: { x: FIELD.w / 2, y: FIELD.h / 2, vx: 0, vy: 0 },
       scoreBlue: 0,
-      scoreOrange: 0
+      scoreOrange: 0,
+      frozen: false,
+      boostPads: makeBoostPads(),
+      particles: []
     };
 
     matchTimeLeft = MATCH_DURATION;
@@ -495,11 +534,13 @@
 
   window.addEventListener('keydown', (e) => {
     if (rebindingAction) return;
-    keysDown[e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase()] = true;
-    if (e.key.toLowerCase() === 'p' && running) togglePause();
+    const k = e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase();
+    keysDown[k] = true;
+    if (k === 'p' && running) togglePause();
   });
   window.addEventListener('keyup', (e) => {
-    keysDown[e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase()] = false;
+    const k = e.key.toLowerCase() === ' ' ? ' ' : e.key.toLowerCase();
+    keysDown[k] = false;
   });
 
   function readLocalInput() {
@@ -513,7 +554,7 @@
   }
 
   /* =====================================================
-     CONTROLES MOBILES (placeholder simple)
+     CONTROLES MOBILES
   ===================================================== */
 
   function buildMobileControls() {
@@ -543,15 +584,24 @@
   }
 
   /* =====================================================
-     PHYSIQUE
+     PHYSIQUE VOITURE
   ===================================================== */
 
-  function applyInputToCar(car, input) {
-    car._pendingInput = input;
-  }
+  function updateCar(car, input, dt) {
+    if (car.exploded) {
+      car.explodeTimer -= dt;
+      if (car.explodeTimer <= 0) respawnCar(car);
+      return;
+    }
 
-  function simulateCar(car, input, dt) {
-    const speed = Math.hypot(car.vx, car.vy);
+    if (world.frozen) {
+      car.vx = 0;
+      car.vy = 0;
+      car.speed = 0;
+      car.boosting = false;
+      return;
+    }
+
     const boosting = input.boost && car.boost > 0;
     const maxSpeed = boosting ? CAR_CFG.maxSpeedBoost : CAR_CFG.maxSpeed;
 
@@ -559,7 +609,7 @@
     if (input.right) car.angle += CAR_CFG.turnSpeed * dt * 60;
 
     let thrust = 0;
-    if (input.forward) thrust = CAR_CFG.accel * (boosting ? 1.8 : 1);
+    if (input.forward) thrust = CAR_CFG.accel * (boosting ? CAR_CFG.boostThrustMult : 1);
     if (input.backward) thrust = -CAR_CFG.reverseAccel;
 
     car.vx += Math.cos(car.angle) * thrust * dt * 60;
@@ -587,8 +637,161 @@
       car.boost = Math.min(100, car.boost + CAR_CFG.boostRegen * dt);
     }
     car.boosting = boosting;
-    car.speed = newSpeed;
+    car.speed = Math.hypot(car.vx, car.vy);
   }
+
+  function explodeCar(car) {
+    car.exploded = true;
+    car.explodeTimer = 2;
+    spawnExplosion(car.x, car.y, car.team);
+    car.vx = 0;
+    car.vy = 0;
+  }
+
+  function respawnCar(car) {
+    car.exploded = false;
+    car.x = car.startX;
+    car.y = car.startY;
+    car.angle = car.startAngle;
+    car.vx = 0;
+    car.vy = 0;
+    car.speed = 0;
+  }
+
+  function resetCarsAndBallForGoal() {
+    world.cars.forEach(car => {
+      car.exploded = false;
+      car.x = car.startX;
+      car.y = car.startY;
+      car.angle = car.startAngle;
+      car.vx = 0;
+      car.vy = 0;
+      car.speed = 0;
+    });
+    world.ball.x = FIELD.w / 2;
+    world.ball.y = FIELD.h / 2;
+    world.ball.vx = 0;
+    world.ball.vy = 0;
+  }
+
+  /* =====================================================
+     COLLISIONS VOITURE - VOITURE (DEMOLITION)
+  ===================================================== */
+
+  function checkCarCollision(carA, carB) {
+    if (carA.exploded || carB.exploded) return;
+
+    const dx = carB.x - carA.x;
+    const dy = carB.y - carA.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = CAR_CFG.collisionRadius * 2;
+
+    if (dist >= minDist || dist === 0) return;
+
+    const speedAKmh = speedToKmh(Math.hypot(carA.vx, carA.vy));
+    const speedBKmh = speedToKmh(Math.hypot(carB.vx, carB.vy));
+    const topSpeed = Math.max(speedAKmh, speedBKmh);
+
+    if (topSpeed >= EXPLOSION_THRESHOLD_KMH) {
+      if (speedAKmh > speedBKmh) {
+        explodeCar(carB);
+      } else if (speedBKmh > speedAKmh) {
+        explodeCar(carA);
+      } else {
+        explodeCar(carA);
+        explodeCar(carB);
+      }
+      return;
+    }
+
+    // Collision normale : on repousse les voitures
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const overlap = minDist - dist;
+
+    carA.x -= nx * overlap * 0.5;
+    carA.y -= ny * overlap * 0.5;
+    carB.x += nx * overlap * 0.5;
+    carB.y += ny * overlap * 0.5;
+
+    const relVx = carB.vx - carA.vx;
+    const relVy = carB.vy - carA.vy;
+    const relSpeed = relVx * nx + relVy * ny;
+
+    if (relSpeed < 0) {
+      const bounce = 0.6;
+      carA.vx += nx * relSpeed * bounce;
+      carA.vy += ny * relSpeed * bounce;
+      carB.vx -= nx * relSpeed * bounce;
+      carB.vy -= ny * relSpeed * bounce;
+    }
+  }
+
+  /* =====================================================
+     PADS DE BOOST
+  ===================================================== */
+
+  function updateBoostPads(dt) {
+    world.boostPads.forEach(pad => {
+      if (!pad.active) {
+        pad.cooldown -= dt;
+        if (pad.cooldown <= 0) pad.active = true;
+        return;
+      }
+
+      world.cars.forEach(car => {
+        if (car.exploded) return;
+        const dx = car.x - pad.x;
+        const dy = car.y - pad.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < pad.radius + CAR_CFG.collisionRadius) {
+          car.boost = 100;
+          pad.active = false;
+          pad.cooldown = BOOST_PAD_COOLDOWN;
+        }
+      });
+    });
+  }
+
+  /* =====================================================
+     PARTICULES D'EXPLOSION
+  ===================================================== */
+
+  function spawnExplosion(x, y, team) {
+    const colors = team === 'blue'
+      ? ['#43d9ff', '#ffffff', '#ff9d2e']
+      : ['#ff9d2e', '#ffffff', '#43d9ff'];
+
+    for (let i = 0; i < 16; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 4;
+      world.particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 0.6,
+        maxLife: 0.6,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 3 + Math.random() * 4
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (let i = world.particles.length - 1; i >= 0; i--) {
+      const p = world.particles[i];
+      p.x += p.vx * dt * 60;
+      p.y += p.vy * dt * 60;
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+      p.life -= dt;
+      if (p.life <= 0) world.particles.splice(i, 1);
+    }
+  }
+
+  /* =====================================================
+     PHYSIQUE BALLE
+  ===================================================== */
 
   function simulateBall(ball, dt) {
     ball.x += ball.vx * dt * 60;
@@ -618,10 +821,12 @@
   }
 
   function carBallCollision(car, ball) {
+    if (car.exploded) return;
+
     const dx = ball.x - car.x;
     const dy = ball.y - car.y;
     const dist = Math.hypot(dx, dy);
-    const minDist = BALL_CFG.radius + Math.max(CAR_CFG.width, CAR_CFG.height) / 2.2;
+    const minDist = BALL_CFG.radius + CAR_CFG.collisionRadius;
 
     if (dist < minDist && dist > 0) {
       const nx = dx / dist;
@@ -638,6 +843,7 @@
   }
 
   function checkGoal() {
+    if (world.frozen) return;
     const ball = world.ball;
     const r = BALL_CFG.radius;
     const goalTop = FIELD.h / 2 - FIELD.goalHeight / 2;
@@ -655,25 +861,28 @@
     else world.scoreOrange++;
 
     updateScoreDisplay();
-    showGoalMessage(scoringTeam);
+    world.frozen = true;
+    resetCarsAndBallForGoal();
 
-    world.ball.x = FIELD.w / 2;
-    world.ball.y = FIELD.h / 2;
-    world.ball.vx = 0;
-    world.ball.vy = 0;
-    world.cars[0].x = FIELD.w * 0.25; world.cars[0].y = FIELD.h / 2; world.cars[0].vx = 0; world.cars[0].vy = 0;
-    world.cars[1].x = FIELD.w * 0.75; world.cars[1].y = FIELD.h / 2; world.cars[1].vx = 0; world.cars[1].vy = 0;
+    showGoalMessage(scoringTeam, () => {
+      runCountdown(3, () => {
+        world.frozen = false;
+      });
+    });
   }
 
-  function showGoalMessage(team) {
+  function showGoalMessage(team, onHidden) {
     const msg = $('goalMessage');
     $('goalScorer').textContent = team === 'blue' ? 'BLUE UNIT' : 'ORANGE CREW';
     show(msg);
-    setTimeout(() => hide(msg), 1500);
+    setTimeout(() => {
+      hide(msg);
+      if (onHidden) onHidden();
+    }, 1500);
   }
 
   /* =====================================================
-     BOT (mode hors ligne)
+     BOT
   ===================================================== */
 
   function botInput(car, ball) {
@@ -709,8 +918,6 @@
       if (matchTimeLeft <= 0) endMatch();
     }, 1000);
 
-    animFrameId = requestAnimationFrame(gameLoop);
-
     let lastNetworkSend = 0;
 
     function gameLoop(ts) {
@@ -721,7 +928,7 @@
       if (!paused) {
         if (isHost) {
           const myInput = readLocalInput();
-          simulateCar(world.cars[0], myInput, dt);
+          updateCar(world.cars[0], myInput, dt);
 
           let p2Input;
           if (mode === 'offline') {
@@ -729,12 +936,18 @@
           } else {
             p2Input = world.cars[1]._pendingInput || { forward: false, backward: false, left: false, right: false, boost: false };
           }
-          simulateCar(world.cars[1], p2Input, dt);
+          updateCar(world.cars[1], p2Input, dt);
 
-          simulateBall(world.ball, dt);
-          carBallCollision(world.cars[0], world.ball);
-          carBallCollision(world.cars[1], world.ball);
-          checkGoal();
+          if (!world.frozen) {
+            simulateBall(world.ball, dt);
+            checkCarCollision(world.cars[0], world.cars[1]);
+            carBallCollision(world.cars[0], world.ball);
+            carBallCollision(world.cars[1], world.ball);
+            checkGoal();
+          }
+
+          updateBoostPads(dt);
+          updateParticles(dt);
 
           if (mode === 'online' && ts - lastNetworkSend > 33) {
             lastNetworkSend = ts;
@@ -745,21 +958,27 @@
                 ball: world.ball,
                 scoreBlue: world.scoreBlue,
                 scoreOrange: world.scoreOrange,
-                timeLeft: matchTimeLeft
+                timeLeft: matchTimeLeft,
+                frozen: world.frozen,
+                boostPads: world.boostPads
               }
             }));
           }
         } else {
           const myInput = readLocalInput();
           ws.send(JSON.stringify({ type: 'input', input: myInput }));
+          updateParticles(dt);
         }
 
         updateHud();
+        updateBallSpeedDisplay();
       }
 
       render();
       animFrameId = requestAnimationFrame(gameLoop);
     }
+
+    animFrameId = requestAnimationFrame(gameLoop);
   }
 
   function applyRemoteState(state) {
@@ -769,6 +988,8 @@
     world.scoreBlue = state.scoreBlue;
     world.scoreOrange = state.scoreOrange;
     matchTimeLeft = state.timeLeft;
+    world.frozen = state.frozen;
+    world.boostPads = state.boostPads;
     updateScoreDisplay();
     updateTimerDisplay();
   }
@@ -803,18 +1024,86 @@
     ctx.strokeStyle = '#ff9d2e';
     ctx.strokeRect(FIELD.w - FIELD.goalDepth, goalTop, FIELD.goalDepth, FIELD.goalHeight);
 
-    world.cars.forEach(car => drawCar(car));
+    world.boostPads.forEach(drawBoostPad);
+
+    world.cars.forEach(car => { if (!car.exploded) drawCar(car); });
     drawBall(world.ball);
+
+    world.particles.forEach(drawParticle);
+  }
+
+  function drawBoostPad(pad) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(pad.x, pad.y, pad.radius, 0, Math.PI * 2);
+    if (pad.active) {
+      ctx.fillStyle = 'rgba(255, 220, 80, 0.85)';
+      ctx.shadowColor = '#ffdc50';
+      ctx.shadowBlur = 18;
+    } else {
+      ctx.fillStyle = 'rgba(120, 120, 120, 0.3)';
+      ctx.shadowBlur = 0;
+    }
+    ctx.fill();
+    ctx.strokeStyle = pad.active ? '#fff3b0' : 'rgba(200,200,200,0.3)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawCar(car) {
     ctx.save();
     ctx.translate(car.x, car.y);
     ctx.rotate(car.angle);
-    ctx.fillStyle = car.team === 'blue' ? '#43d9ff' : '#ff9d2e';
-    ctx.shadowColor = ctx.fillStyle;
+
+    const mainColor = car.team === 'blue' ? '#43d9ff' : '#ff9d2e';
+    const darkColor = car.team === 'blue' ? '#1f6fa0' : '#a5560f';
+
+    // Flamme de boost
+    if (car.boosting) {
+      ctx.beginPath();
+      ctx.moveTo(-CAR_CFG.width / 2, -6);
+      ctx.lineTo(-CAR_CFG.width / 2 - 18 - Math.random() * 6, 0);
+      ctx.lineTo(-CAR_CFG.width / 2, 6);
+      ctx.closePath();
+      ctx.fillStyle = '#7cf2ff';
+      ctx.shadowColor = '#7cf2ff';
+      ctx.shadowBlur = 14;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Roues
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-CAR_CFG.width / 2 + 3, -CAR_CFG.height / 2 - 3, 10, 4);
+    ctx.fillRect(-CAR_CFG.width / 2 + 3, CAR_CFG.height / 2 - 1, 10, 4);
+    ctx.fillRect(CAR_CFG.width / 2 - 13, -CAR_CFG.height / 2 - 3, 10, 4);
+    ctx.fillRect(CAR_CFG.width / 2 - 13, CAR_CFG.height / 2 - 1, 10, 4);
+
+    // Corps
+    ctx.fillStyle = mainColor;
+    ctx.shadowColor = mainColor;
     ctx.shadowBlur = 12;
-    ctx.fillRect(-CAR_CFG.width / 2, -CAR_CFG.height / 2, CAR_CFG.width, CAR_CFG.height);
+    ctx.beginPath();
+    ctx.moveTo(-CAR_CFG.width / 2, -CAR_CFG.height / 2 + 4);
+    ctx.lineTo(CAR_CFG.width / 2 - 6, -CAR_CFG.height / 2);
+    ctx.lineTo(CAR_CFG.width / 2, 0);
+    ctx.lineTo(CAR_CFG.width / 2 - 6, CAR_CFG.height / 2);
+    ctx.lineTo(-CAR_CFG.width / 2, CAR_CFG.height / 2 - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Bande sombre
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(-CAR_CFG.width / 2 + 4, -3, CAR_CFG.width - 14, 6);
+
+    // Cockpit
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(2, 0, 8, CAR_CFG.height / 2 - 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.restore();
   }
 
@@ -826,6 +1115,22 @@
     ctx.shadowBlur = 10;
     ctx.fill();
     ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  function drawParticle(p) {
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.restore();
   }
 
   /* =====================================================
@@ -836,7 +1141,14 @@
     const myCar = world.cars[myPlayerNumber === 2 ? 1 : 0];
     $('boostFill').style.width = myCar.boost + '%';
     $('boostNumber').textContent = Math.round(myCar.boost);
-    $('speedNumber').textContent = Math.round((myCar.speed || 0) * 20);
+    $('speedNumber').textContent = Math.round(speedToKmh(myCar.speed || 0));
+  }
+
+  function updateBallSpeedDisplay() {
+    const el = $('ballSpeedNumber');
+    if (!el || !world) return;
+    const speed = speedToKmh(Math.hypot(world.ball.vx, world.ball.vy));
+    el.textContent = 'BALL: ' + Math.round(speed) + ' KM/H';
   }
 
   function updateScoreDisplay() {
@@ -919,11 +1231,10 @@
   }
 
   /* =====================================================
-     HOW TO PLAY (existant dans le HTML)
+     HOW TO PLAY
   ===================================================== */
 
   function initHowToPlay() {
-    $('howToPlayButton') && ($('howToPlayButton').onclick = () => {});
     if ($('backButton')) {
       $('backButton').onclick = () => {
         hide($('howToPlayMenu'));
@@ -939,6 +1250,7 @@
   function init() {
     loadControls();
     injectDynamicStyles();
+    injectBallSpeedDisplay();
     hide($('mainMenu'));
     buildShopMenu();
     buildSearchingOverlay();
