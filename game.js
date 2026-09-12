@@ -21,12 +21,12 @@
   const CAR_CFG = {
     width: 46,
     height: 26,
-    maxSpeed: kmhToPxFrame(36),        // voitures ralenties (avant: 51)
-    maxSpeedBoost: kmhToPxFrame(58),   // voitures ralenties (avant: 83)
+    maxSpeed: kmhToPxFrame(36),
+    maxSpeedBoost: kmhToPxFrame(58),
     turnSpeed: 0.05,
     friction: 0.985,
     boostDrain: 35,
-    boostRegen: 10,
+    boostRegen: 0, // plus de régénération automatique : uniquement via les pads
     collisionRadius: 24
   };
   CAR_CFG.accel = CAR_CFG.maxSpeed / 40;
@@ -60,7 +60,6 @@
     ];
   }
 
-  // Zone invisible de "save" devant chaque but
   const SAVE_ZONE_DEPTH = 160;
   const SAVE_ZONE_MARGIN = 50;
 
@@ -105,6 +104,7 @@
   const touchInput = { forward: false, backward: false, left: false, right: false, boost: false };
 
   let rebindingAction = null;
+  let settingsOpenedFrom = 'mainMenu'; // 'mainMenu' | 'pauseMenu'
 
   let canvas, ctx;
   let running = false;
@@ -245,7 +245,7 @@
     const span = document.createElement('span');
     span.id = 'ballSpeedNumber';
     span.textContent = 'BALL: 0 KM/H';
-    orangeTeamEl.appendChild(span); // à DROITE du score orange
+    orangeTeamEl.appendChild(span);
   }
 
   function injectStatsBar() {
@@ -333,7 +333,7 @@
 
     show(mainMenu);
 
-    $('openSettingsBtn').onclick = openSettings;
+    $('openSettingsBtn').onclick = () => openSettings('mainMenu');
     $('openShopBtn').onclick = openShop;
     $('play1v1OnlineBtn').onclick = () => startMatch('online');
     $('play1v1OfflineBtn').onclick = () => startMatch('offline');
@@ -351,8 +351,13 @@
     $('boostKeyButton').textContent = controls.boost === ' ' ? 'SPACE' : controls.boost.toUpperCase();
   }
 
-  function openSettings() {
-    hide($('mainMenu'));
+  function openSettings(fromMenu) {
+    settingsOpenedFrom = fromMenu;
+    if (fromMenu === 'mainMenu') {
+      hide($('mainMenu'));
+    } else {
+      hide($('pauseMenu'));
+    }
     refreshSettingsLabels();
     show($('settingsMenu'));
   }
@@ -398,7 +403,11 @@
 
     $('settingsBackButton').onclick = () => {
       hide($('settingsMenu'));
-      show($('mainMenu'));
+      if (settingsOpenedFrom === 'pauseMenu') {
+        show($('pauseMenu'));
+      } else {
+        show($('mainMenu'));
+      }
     };
   }
 
@@ -698,7 +707,7 @@
 
     if (boosting) {
       car.boost = Math.max(0, car.boost - CAR_CFG.boostDrain * dt);
-    } else {
+    } else if (CAR_CFG.boostRegen > 0) {
       car.boost = Math.min(100, car.boost + CAR_CFG.boostRegen * dt);
     }
     car.boosting = boosting;
@@ -1282,7 +1291,7 @@
 
   function initPauseMenu() {
     $('resumeButton').onclick = () => { paused = false; hide($('pauseMenu')); };
-    $('pauseSettingsButton').onclick = () => { hide($('pauseMenu')); show($('settingsMenu')); };
+    $('pauseSettingsButton').onclick = () => openSettings('pauseMenu');
     $('concedeButton').onclick = () => { hide($('pauseMenu')); show($('concedeConfirm')); };
     $('pauseMainMenuButton').onclick = () => { returnToMainMenu(); };
 
