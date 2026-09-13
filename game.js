@@ -6,7 +6,7 @@
   ===================================================== */
 
   const SERVER_URL = 'wss://kyro-io.onrender.com';
-  const ADMIN_CODE = 'TURBO2026';
+  let ADMIN_CODE = 'TURBO2026';
 
   const FIELD = {
     w: 1200,
@@ -127,9 +127,11 @@
 
   // Admin
   let isAdmin = false;
-  let shopItems = [];
-  let notifications = [];
+  let shopItems = [];       // { id, name, price, discount, purchases }
+  let notifications = [];   // { id, destination: 'notification'|'upcoming', title, body, date, sender }
   let lastSeenNotifCount = 0;
+  let mailboxActiveTab = 'notification';
+  let adminActiveTab = 'boutique';
 
   /* =====================================================
      UTILITAIRES
@@ -154,6 +156,11 @@
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
   function teamOfPlayer(num) { return num === 1 ? 'blue' : 'orange'; }
+
+  function discountedPrice(item) {
+    const d = item.discount || 0;
+    return Math.round(item.price * (1 - d / 100));
+  }
 
   /* =====================================================
      STYLES DYNAMIQUES
@@ -188,7 +195,7 @@
         flex-direction: column;
         gap: 10px;
         margin: 20px 0;
-        max-height: 300px;
+        max-height: 340px;
         overflow-y: auto;
       }
       #shopMenu .shop-item {
@@ -200,10 +207,34 @@
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 8px;
         font-size: 12px;
+        gap: 12px;
       }
+      #shopMenu .shop-item .item-info { text-align: left; }
       #shopMenu .shop-item .item-price {
         color: #baff35;
         font-weight: bold;
+        white-space: nowrap;
+      }
+      #shopMenu .shop-item .item-price .old-price {
+        color: #7d8ca0;
+        text-decoration: line-through;
+        font-weight: normal;
+        margin-right: 6px;
+        font-size: 10px;
+      }
+      #shopMenu .shop-item .buy-btn {
+        padding: 8px 14px;
+        font-size: 10px;
+        border-radius: 20px;
+        white-space: nowrap;
+      }
+      #shopMenu .discount-tag {
+        background: #ff5b3d;
+        color: white;
+        font-size: 9px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        margin-left: 6px;
       }
 
       #searchingOverlay {
@@ -303,13 +334,13 @@
         cursor: pointer;
       }
 
-      /* ===== ADMIN ===== */
+      /* ===== ADMIN BOUTONS FLOTTANTS (bien arrondis) ===== */
 
-      #adminToggleBtn, #adminPanelBtn, #mailboxBtn {
+      #adminToggleBtn, #mailboxBtn {
         position: fixed;
         top: 14px;
-        width: 36px;
-        height: 36px;
+        width: 38px;
+        height: 38px;
         border-radius: 50%;
         padding: 0;
         font-size: 15px;
@@ -322,8 +353,25 @@
         background: rgba(4, 10, 20, 0.85);
       }
       #adminToggleBtn { right: 14px; }
-      #adminPanelBtn { right: 58px; font-size: 9px; letter-spacing: 0; width: auto; padding: 0 10px; border-radius: 18px; }
       #mailboxBtn { left: 14px; }
+
+      #adminPanelBtn {
+        position: fixed;
+        top: 14px;
+        right: 60px;
+        height: 38px;
+        padding: 0 16px;
+        font-size: 9px;
+        letter-spacing: 1px;
+        border-radius: 20px;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(90, 200, 255, 0.4);
+        background: rgba(4, 10, 20, 0.85);
+      }
+
       #mailboxBtn .badge {
         position: absolute;
         top: -4px;
@@ -352,36 +400,131 @@
       }
 
       #adminCodeModal .panel, #adminPanelModal .panel, #mailboxModal .panel {
-        width: min(500px, 90vw);
+        width: min(560px, 92vw);
         max-height: 85vh;
         overflow-y: auto;
-        padding: 35px;
+        padding: 32px;
       }
 
-      .admin-section {
-        text-align: left;
-        margin-top: 25px;
-        padding-top: 20px;
-        border-top: 1px solid rgba(255,255,255,0.08);
+      .admin-tabs, .mailbox-tabs {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin: 20px 0 10px;
       }
-      .admin-section h3 {
+      .admin-tabs button, .mailbox-tabs button {
+        padding: 9px 18px;
+        font-size: 10px;
+        border-radius: 20px;
+        letter-spacing: 1px;
+      }
+      .admin-tabs button.active, .mailbox-tabs button.active {
+        background: #00bfff;
+        box-shadow: 0 0 20px rgba(0,191,255,0.5);
+      }
+
+      .admin-section-content { text-align: left; margin-top: 15px; }
+      .admin-section-content h3 {
         color: #42cfff;
-        font-size: 14px;
+        font-size: 13px;
         letter-spacing: 2px;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
       }
-      .admin-section input, .admin-section select, .admin-section textarea {
+      .admin-section-content input,
+      .admin-section-content select,
+      .admin-section-content textarea {
         width: 100%;
         padding: 10px 12px;
         margin-bottom: 10px;
         background: rgba(255,255,255,0.05);
         border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 6px;
+        border-radius: 8px;
         color: white;
         font-family: inherit;
         font-size: 12px;
       }
-      .admin-section textarea { resize: vertical; min-height: 60px; }
+      .admin-section-content textarea { resize: vertical; min-height: 60px; }
+      .admin-section-content button.full { width: 100%; border-radius: 20px; }
+
+      .admin-block {
+        margin-bottom: 22px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+      }
+      .admin-block:last-child { border-bottom: none; }
+
+      .admin-shop-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 8px;
+        font-size: 11px;
+      }
+      .admin-shop-row .row-info { flex: 1; min-width: 0; }
+      .admin-shop-row .row-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .admin-shop-row .row-actions input {
+        width: 55px;
+        padding: 6px 8px;
+        margin: 0;
+        font-size: 10px;
+        border-radius: 6px;
+      }
+      .admin-shop-row .row-actions button {
+        padding: 6px 10px;
+        font-size: 9px;
+        border-radius: 14px;
+      }
+      .admin-shop-row .delete-btn {
+        border-color: #ff5b3d;
+        color: #ff5b3d;
+      }
+      .admin-shop-row .stats-mini {
+        display: block;
+        font-size: 9px;
+        color: #7d8ca0;
+        margin-top: 3px;
+      }
+
+      .admin-msg-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        background: rgba(255,255,255,0.03);
+        border-left: 3px solid #43d9ff;
+        border-radius: 6px;
+        font-size: 11px;
+      }
+      .admin-msg-row.upcoming { border-left-color: #ff9d2e; }
+      .admin-msg-row .row-info { flex: 1; min-width: 0; text-align: left; }
+      .admin-msg-row .row-info .msg-tag {
+        font-size: 9px;
+        letter-spacing: 1px;
+        color: #7d8ca0;
+      }
+      .admin-msg-row .row-info .msg-title {
+        font-weight: bold;
+        color: white;
+        margin: 3px 0;
+      }
+      .admin-msg-row .delete-btn {
+        border-color: #ff5b3d;
+        color: #ff5b3d;
+        padding: 6px 10px;
+        font-size: 9px;
+        border-radius: 14px;
+        white-space: nowrap;
+      }
 
       .live-count-box {
         text-align: center;
@@ -389,7 +532,7 @@
         margin-top: 10px;
         background: rgba(0,150,255,0.08);
         border: 1px solid rgba(0,180,255,0.25);
-        border-radius: 8px;
+        border-radius: 10px;
       }
       .live-count-box .count {
         font-size: 30px;
@@ -403,9 +546,9 @@
         margin-bottom: 10px;
         background: rgba(255,255,255,0.04);
         border-left: 3px solid #43d9ff;
-        border-radius: 4px;
+        border-radius: 6px;
       }
-      .notif-item.announcement { border-left-color: #ff9d2e; }
+      .notif-item.upcoming { border-left-color: #ff9d2e; }
       .notif-item .notif-meta {
         font-size: 9px;
         color: #7d8ca0;
@@ -477,6 +620,10 @@
     try {
       lastSeenNotifCount = parseInt(localStorage.getItem('turboball_notif_seen') || '0', 10);
     } catch (e) { lastSeenNotifCount = 0; }
+    try {
+      const savedCode = localStorage.getItem('turboball_admin_code');
+      if (savedCode) ADMIN_CODE = savedCode;
+    } catch (e) {}
   }
 
   function saveShopItems() {
@@ -487,8 +634,12 @@
     localStorage.setItem('turboball_notifications', JSON.stringify(notifications));
   }
 
+  function saveAdminCode() {
+    localStorage.setItem('turboball_admin_code', ADMIN_CODE);
+  }
+
   /* =====================================================
-     ADMIN : boutons flottants (code + panel + boîte aux lettres)
+     ADMIN : boutons flottants
   ===================================================== */
 
   function injectAdminUI() {
@@ -532,18 +683,16 @@
     div.innerHTML = `
       <div class="panel">
         <h2>ACCÈS ADMIN</h2>
-        <div class="admin-section" style="border-top:none; margin-top:15px; padding-top:0;">
+        <div class="admin-section-content" style="margin-top:15px;">
           <input type="password" id="adminCodeInput" placeholder="Entrez le code">
-          <button id="adminCodeSubmit" class="main-button" style="width:100%;">VALIDER</button>
-          <button id="adminCodeCancel" class="secondary-button" style="width:100%; margin-top:8px;">ANNULER</button>
+          <button id="adminCodeSubmit" class="main-button full">VALIDER</button>
+          <button id="adminCodeCancel" class="secondary-button full" style="margin-top:8px;">ANNULER</button>
         </div>
       </div>
     `;
     document.body.appendChild(div);
 
     const close = () => div.remove();
-
-    $('adminCodeCancel', div) || (div.querySelector('#adminCodeCancel').onclick = close);
     div.querySelector('#adminCodeCancel').onclick = close;
 
     div.querySelector('#adminCodeSubmit').onclick = () => {
@@ -565,82 +714,220 @@
     });
   }
 
+  /* =====================================================
+     ADMIN PANEL (3 catégories : Boutique / Général / Annonce)
+  ===================================================== */
+
   function openAdminPanel() {
     const div = document.createElement('div');
     div.id = 'adminPanelModal';
     div.innerHTML = `
       <div class="panel">
         <h2>PANEL ADMIN</h2>
-
-        <div class="admin-section">
-          <h3>AJOUTER UN ARTICLE À LA BOUTIQUE</h3>
-          <input type="text" id="shopItemName" placeholder="Nom de l'article">
-          <input type="number" id="shopItemPrice" placeholder="Prix (points)">
-          <button id="addShopItemBtn" class="main-button" style="width:100%;">AJOUTER</button>
+        <div class="admin-tabs">
+          <button data-tab="boutique" class="secondary-button">BOUTIQUE</button>
+          <button data-tab="general" class="secondary-button">GÉNÉRAL</button>
+          <button data-tab="annonce" class="secondary-button">ANNONCE</button>
         </div>
-
-        <div class="admin-section">
-          <h3>ENVOYER UNE NOTIFICATION</h3>
-          <select id="notifType">
-            <option value="update">MISE À JOUR</option>
-            <option value="announcement">ANNONCE</option>
-          </select>
-          <input type="text" id="notifTitle" placeholder="Titre">
-          <textarea id="notifBody" placeholder="Message"></textarea>
-          <button id="sendNotifBtn" class="main-button" style="width:100%;">ENVOYER</button>
-        </div>
-
-        <div class="admin-section">
-          <h3>PARTIES EN LIGNE EN DIRECT</h3>
-          <div class="live-count-box">
-            <div class="count" id="liveMatchCount">...</div>
-            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">PARTIES ACTIVES</div>
-          </div>
-          <button id="refreshLiveCountBtn" class="secondary-button" style="width:100%; margin-top:10px;">ACTUALISER</button>
-        </div>
-
-        <button id="adminPanelCloseBtn" class="secondary-button" style="width:100%; margin-top:25px;">FERMER</button>
+        <div id="adminTabContent"></div>
+        <button id="adminPanelCloseBtn" class="secondary-button full" style="margin-top:20px;">FERMER</button>
       </div>
     `;
     document.body.appendChild(div);
 
-    div.querySelector('#addShopItemBtn').onclick = () => {
-      const name = div.querySelector('#shopItemName').value.trim();
-      const price = parseInt(div.querySelector('#shopItemPrice').value, 10);
-      if (!name || isNaN(price)) return;
-      shopItems.push({ id: 'item_' + Date.now(), name, price });
-      saveShopItems();
-      div.querySelector('#shopItemName').value = '';
-      div.querySelector('#shopItemPrice').value = '';
-    };
+    const tabButtons = div.querySelectorAll('.admin-tabs button');
+    tabButtons.forEach(btn => {
+      btn.onclick = () => {
+        adminActiveTab = btn.dataset.tab;
+        renderAdminTab(div);
+      };
+    });
 
-    div.querySelector('#sendNotifBtn').onclick = () => {
-      const type = div.querySelector('#notifType').value;
-      const title = div.querySelector('#notifTitle').value.trim();
-      const body = div.querySelector('#notifBody').value.trim();
-      if (!title || !body) return;
-      notifications.unshift({
-        id: 'notif_' + Date.now(),
-        type,
-        sender: type === 'update' ? 'ÉQUIPE TURBOBALL — MISE À JOUR' : 'ÉQUIPE TURBOBALL — ANNONCE',
-        title,
-        body,
-        date: new Date().toLocaleString('fr-FR')
-      });
-      saveNotifications();
-      updateMailboxBadge();
-      div.querySelector('#notifTitle').value = '';
-      div.querySelector('#notifBody').value = '';
-    };
-
-    div.querySelector('#refreshLiveCountBtn').onclick = () => refreshLiveMatchCount(div);
     div.querySelector('#adminPanelCloseBtn').onclick = () => div.remove();
 
-    refreshLiveMatchCount(div);
+    renderAdminTab(div);
+  }
+
+  function renderAdminTab(panelEl) {
+    panelEl.querySelectorAll('.admin-tabs button').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === adminActiveTab);
+    });
+
+    const content = panelEl.querySelector('#adminTabContent');
+
+    if (adminActiveTab === 'boutique') {
+      content.innerHTML = `
+        <div class="admin-section-content">
+          <div class="admin-block">
+            <h3>AJOUTER UN ARTICLE</h3>
+            <input type="text" id="shopItemName" placeholder="Nom de l'article">
+            <input type="number" id="shopItemPrice" placeholder="Prix (points)">
+            <button id="addShopItemBtn" class="main-button full">AJOUTER À LA BOUTIQUE</button>
+          </div>
+          <div class="admin-block">
+            <h3>ARTICLES EN BOUTIQUE</h3>
+            <div id="adminShopList"></div>
+          </div>
+        </div>
+      `;
+
+      content.querySelector('#addShopItemBtn').onclick = () => {
+        const name = content.querySelector('#shopItemName').value.trim();
+        const price = parseInt(content.querySelector('#shopItemPrice').value, 10);
+        if (!name || isNaN(price)) return;
+        shopItems.push({ id: 'item_' + Date.now(), name, price, discount: 0, purchases: 0 });
+        saveShopItems();
+        content.querySelector('#shopItemName').value = '';
+        content.querySelector('#shopItemPrice').value = '';
+        renderAdminShopList(content.querySelector('#adminShopList'));
+      };
+
+      renderAdminShopList(content.querySelector('#adminShopList'));
+
+    } else if (adminActiveTab === 'general') {
+      content.innerHTML = `
+        <div class="admin-section-content">
+          <div class="admin-block">
+            <h3>CHANGER LE CODE ADMIN</h3>
+            <input type="password" id="newAdminCode" placeholder="Nouveau code">
+            <button id="changeAdminCodeBtn" class="main-button full">METTRE À JOUR LE CODE</button>
+          </div>
+          <div class="admin-block">
+            <h3>PARTIES EN LIGNE EN DIRECT</h3>
+            <div class="live-count-box">
+              <div class="count" id="liveMatchCount">...</div>
+              <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">PARTIES ACTIVES</div>
+            </div>
+            <button id="refreshLiveCountBtn" class="secondary-button full" style="margin-top:10px;">ACTUALISER</button>
+          </div>
+        </div>
+      `;
+
+      content.querySelector('#changeAdminCodeBtn').onclick = () => {
+        const val = content.querySelector('#newAdminCode').value.trim();
+        if (!val) return;
+        ADMIN_CODE = val;
+        saveAdminCode();
+        content.querySelector('#newAdminCode').value = '';
+        content.querySelector('#newAdminCode').placeholder = 'Code mis à jour !';
+      };
+
+      content.querySelector('#refreshLiveCountBtn').onclick = () => refreshLiveMatchCount(content);
+      refreshLiveMatchCount(content);
+
+    } else if (adminActiveTab === 'annonce') {
+      content.innerHTML = `
+        <div class="admin-section-content">
+          <div class="admin-block">
+            <h3>ENVOYER UN MESSAGE</h3>
+            <select id="notifDestination">
+              <option value="notification">NOTIFICATION</option>
+              <option value="upcoming">À VENIR</option>
+            </select>
+            <input type="text" id="notifTitle" placeholder="Titre">
+            <textarea id="notifBody" placeholder="Message"></textarea>
+            <button id="sendNotifBtn" class="main-button full">ENVOYER</button>
+          </div>
+          <div class="admin-block">
+            <h3>MESSAGES ENVOYÉS</h3>
+            <div id="adminMsgList"></div>
+          </div>
+        </div>
+      `;
+
+      content.querySelector('#sendNotifBtn').onclick = () => {
+        const destination = content.querySelector('#notifDestination').value;
+        const title = content.querySelector('#notifTitle').value.trim();
+        const body = content.querySelector('#notifBody').value.trim();
+        if (!title || !body) return;
+        notifications.unshift({
+          id: 'notif_' + Date.now(),
+          destination,
+          sender: destination === 'upcoming' ? 'ÉQUIPE TURBOBALL — À VENIR' : 'ÉQUIPE TURBOBALL',
+          title,
+          body,
+          date: new Date().toLocaleString('fr-FR')
+        });
+        saveNotifications();
+        updateMailboxBadge();
+        content.querySelector('#notifTitle').value = '';
+        content.querySelector('#notifBody').value = '';
+        renderAdminMsgList(content.querySelector('#adminMsgList'));
+      };
+
+      renderAdminMsgList(content.querySelector('#adminMsgList'));
+    }
+  }
+
+  function renderAdminShopList(container) {
+    if (!container) return;
+    if (shopItems.length === 0) {
+      container.innerHTML = '<div class="shop-empty">AUCUN ARTICLE POUR L\'INSTANT</div>';
+      return;
+    }
+    container.innerHTML = shopItems.map(item => `
+      <div class="admin-shop-row" data-id="${item.id}">
+        <div class="row-info">
+          <div>${item.name} — <b style="color:#baff35;">${discountedPrice(item)} PTS</b>${item.discount > 0 ? ` <span style="color:#ff9d2e;">(-${item.discount}%)</span>` : ''}</div>
+          <span class="stats-mini">${item.purchases} ACHAT(S)</span>
+        </div>
+        <div class="row-actions">
+          <input type="number" class="discount-input" placeholder="%" min="0" max="100" value="${item.discount || ''}">
+          <button class="secondary-button apply-discount-btn">APPLIQUER</button>
+          <button class="secondary-button delete-btn delete-item-btn">SUPPRIMER</button>
+        </div>
+      </div>
+    `).join('');
+
+    container.querySelectorAll('.admin-shop-row').forEach(row => {
+      const id = row.dataset.id;
+      row.querySelector('.apply-discount-btn').onclick = () => {
+        const val = parseInt(row.querySelector('.discount-input').value, 10);
+        const item = shopItems.find(i => i.id === id);
+        if (item) {
+          item.discount = isNaN(val) ? 0 : clamp(val, 0, 100);
+          saveShopItems();
+          renderAdminShopList(container);
+        }
+      };
+      row.querySelector('.delete-item-btn').onclick = () => {
+        shopItems = shopItems.filter(i => i.id !== id);
+        saveShopItems();
+        renderAdminShopList(container);
+      };
+    });
+  }
+
+  function renderAdminMsgList(container) {
+    if (!container) return;
+    if (notifications.length === 0) {
+      container.innerHTML = '<div class="shop-empty">AUCUN MESSAGE ENVOYÉ</div>';
+      return;
+    }
+    container.innerHTML = notifications.map(n => `
+      <div class="admin-msg-row ${n.destination === 'upcoming' ? 'upcoming' : ''}" data-id="${n.id}">
+        <div class="row-info">
+          <div class="msg-tag">${n.destination === 'upcoming' ? 'À VENIR' : 'NOTIFICATION'} · ${n.date}</div>
+          <div class="msg-title">${n.title}</div>
+        </div>
+        <button class="secondary-button delete-btn delete-msg-btn">SUPPRIMER</button>
+      </div>
+    `).join('');
+
+    container.querySelectorAll('.delete-msg-btn').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.closest('.admin-msg-row').dataset.id;
+        notifications = notifications.filter(n => n.id !== id);
+        saveNotifications();
+        updateMailboxBadge();
+        renderAdminMsgList(container);
+      };
+    });
   }
 
   function refreshLiveMatchCount(panelEl) {
     const countEl = panelEl.querySelector('#liveMatchCount');
+    if (!countEl) return;
     countEl.textContent = '...';
     fetchLiveMatchCount((count) => {
       countEl.textContent = count === null ? 'N/A' : count;
@@ -683,7 +970,7 @@
   }
 
   /* =====================================================
-     BOÎTE AUX LETTRES (notifications)
+     BOÎTE AUX LETTRES (2 onglets : Notifications / À venir)
   ===================================================== */
 
   function updateMailboxBadge() {
@@ -701,26 +988,26 @@
   function openMailbox() {
     const div = document.createElement('div');
     div.id = 'mailboxModal';
-
-    let listHtml = '<div class="notif-empty">AUCUNE NOTIFICATION POUR L\'INSTANT</div>';
-    if (notifications.length > 0) {
-      listHtml = notifications.map(n => `
-        <div class="notif-item ${n.type === 'announcement' ? 'announcement' : ''}">
-          <div class="notif-meta">${n.sender} · ${n.date}</div>
-          <div class="notif-title">${n.title}</div>
-          <div class="notif-body">${n.body}</div>
-        </div>
-      `).join('');
-    }
-
     div.innerHTML = `
       <div class="panel">
         <h2>BOÎTE AUX LETTRES</h2>
-        <div style="margin-top:20px;">${listHtml}</div>
-        <button id="mailboxCloseBtn" class="secondary-button" style="width:100%; margin-top:20px;">FERMER</button>
+        <div class="mailbox-tabs">
+          <button data-tab="notification" class="secondary-button">NOTIFICATIONS</button>
+          <button data-tab="upcoming" class="secondary-button">À VENIR</button>
+        </div>
+        <div id="mailboxContent"></div>
+        <button id="mailboxCloseBtn" class="secondary-button full" style="margin-top:20px;">FERMER</button>
       </div>
     `;
     document.body.appendChild(div);
+
+    const tabButtons = div.querySelectorAll('.mailbox-tabs button');
+    tabButtons.forEach(btn => {
+      btn.onclick = () => {
+        mailboxActiveTab = btn.dataset.tab;
+        renderMailboxContent(div);
+      };
+    });
 
     div.querySelector('#mailboxCloseBtn').onclick = () => {
       div.remove();
@@ -728,6 +1015,30 @@
       localStorage.setItem('turboball_notif_seen', String(lastSeenNotifCount));
       updateMailboxBadge();
     };
+
+    renderMailboxContent(div);
+  }
+
+  function renderMailboxContent(panelEl) {
+    panelEl.querySelectorAll('.mailbox-tabs button').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === mailboxActiveTab);
+    });
+
+    const content = panelEl.querySelector('#mailboxContent');
+    const filtered = notifications.filter(n => n.destination === mailboxActiveTab);
+
+    if (filtered.length === 0) {
+      content.innerHTML = '<div class="notif-empty">AUCUN MESSAGE POUR L\'INSTANT</div>';
+      return;
+    }
+
+    content.innerHTML = filtered.map(n => `
+      <div class="notif-item ${n.destination === 'upcoming' ? 'upcoming' : ''}">
+        <div class="notif-meta">${n.sender} · ${n.date}</div>
+        <div class="notif-title">${n.title}</div>
+        <div class="notif-body">${n.body}</div>
+      </div>
+    `).join('');
   }
 
   /* =====================================================
@@ -876,7 +1187,7 @@
   }
 
   /* =====================================================
-     BOUTIQUE
+     BOUTIQUE (côté joueur)
   ===================================================== */
 
   function buildShopMenu() {
@@ -905,11 +1216,29 @@
       return;
     }
     content.innerHTML = '<div class="shop-list">' + shopItems.map(item => `
-      <div class="shop-item">
-        <span>${item.name}</span>
-        <span class="item-price">${item.price} PTS</span>
+      <div class="shop-item" data-id="${item.id}">
+        <div class="item-info">
+          ${item.name}
+          ${item.discount > 0 ? `<span class="discount-tag">-${item.discount}%</span>` : ''}
+        </div>
+        <div class="item-price">
+          ${item.discount > 0 ? `<span class="old-price">${item.price} PTS</span>` : ''}${discountedPrice(item)} PTS
+        </div>
+        <button class="secondary-button buy-btn">ACHETER</button>
       </div>
     `).join('') + '</div>';
+
+    content.querySelectorAll('.buy-btn').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.closest('.shop-item').dataset.id;
+        const item = shopItems.find(i => i.id === id);
+        if (!item) return;
+        item.purchases = (item.purchases || 0) + 1;
+        saveShopItems();
+        btn.textContent = 'ACHETÉ ✓';
+        setTimeout(() => { btn.textContent = 'ACHETER'; }, 1200);
+      };
+    });
   }
 
   function openShop() {
