@@ -127,11 +127,12 @@
 
   // Admin
   let isAdmin = false;
-  let shopItems = [];       // { id, name, price, discount, purchases }
-  let notifications = [];   // { id, destination: 'notification'|'upcoming', title, body, date, sender }
+  let shopItems = [];
+  let notifications = [];
   let lastSeenNotifCount = 0;
   let mailboxActiveTab = 'notification';
   let adminActiveTab = 'boutique';
+  let notifDestinationChoice = 'notification';
 
   /* =====================================================
      UTILITAIRES
@@ -334,7 +335,7 @@
         cursor: pointer;
       }
 
-      /* ===== ADMIN BOUTONS FLOTTANTS (bien arrondis) ===== */
+      /* ===== ADMIN BOUTONS FLOTTANTS ===== */
 
       #adminToggleBtn, #mailboxBtn {
         position: fixed;
@@ -358,7 +359,7 @@
       #adminPanelBtn {
         position: fixed;
         top: 14px;
-        right: 60px;
+        right: 14px;
         height: 38px;
         padding: 0 16px;
         font-size: 9px;
@@ -408,15 +409,16 @@
 
       .admin-tabs, .mailbox-tabs {
         display: flex;
-        gap: 8px;
+        gap: 6px;
         justify-content: center;
-        margin: 20px 0 10px;
+        margin: 18px 0 10px;
+        flex-wrap: wrap;
       }
       .admin-tabs button, .mailbox-tabs button {
-        padding: 9px 18px;
-        font-size: 10px;
-        border-radius: 20px;
-        letter-spacing: 1px;
+        padding: 6px 12px;
+        font-size: 9px;
+        border-radius: 14px;
+        letter-spacing: 0.5px;
       }
       .admin-tabs button.active, .mailbox-tabs button.active {
         background: #00bfff;
@@ -526,6 +528,39 @@
         white-space: nowrap;
       }
 
+      /* Sélecteur destination : petits carrés */
+      .dest-label {
+        font-size: 10px;
+        letter-spacing: 1px;
+        color: #91a2b4;
+        margin-bottom: 8px;
+        display: block;
+      }
+      .destination-toggle {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .dest-btn {
+        width: 78px;
+        height: 42px;
+        border-radius: 8px;
+        font-size: 9px;
+        letter-spacing: 0.5px;
+        padding: 0 4px;
+        text-align: center;
+        line-height: 1.3;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.04);
+        color: #dce8f2;
+      }
+      .dest-btn.active {
+        background: #00bfff;
+        border-color: #00bfff;
+        box-shadow: 0 0 15px rgba(0,191,255,0.5);
+        color: white;
+      }
+
       .live-count-box {
         text-align: center;
         padding: 14px;
@@ -538,6 +573,16 @@
         font-size: 30px;
         font-weight: 900;
         color: #43d9ff;
+      }
+
+      #logoutAdminBtn {
+        border-color: #ff5b3d;
+        color: #ff5b3d;
+      }
+      #logoutAdminBtn:hover {
+        background: #ff5b3d;
+        color: white;
+        box-shadow: 0 0 25px #ff3d20;
       }
 
       .notif-item {
@@ -662,12 +707,6 @@
     document.body.appendChild(mailboxBtn);
 
     adminBtn.onclick = () => {
-      if (isAdmin) {
-        isAdmin = false;
-        hide(panelBtn);
-        adminBtn.textContent = '⚙';
-        return;
-      }
       openAdminCodeModal();
     };
 
@@ -699,7 +738,7 @@
       const val = div.querySelector('#adminCodeInput').value;
       if (val === ADMIN_CODE) {
         isAdmin = true;
-        $('adminToggleBtn').textContent = '✓';
+        hide($('adminToggleBtn'));
         show($('adminPanelBtn'));
         close();
       } else {
@@ -712,6 +751,14 @@
     div.querySelector('#adminCodeInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') div.querySelector('#adminCodeSubmit').click();
     });
+  }
+
+  function adminLogout() {
+    isAdmin = false;
+    hide($('adminPanelBtn'));
+    show($('adminToggleBtn'));
+    const modal = $('adminPanelModal');
+    if (modal) modal.remove();
   }
 
   /* =====================================================
@@ -800,6 +847,10 @@
             </div>
             <button id="refreshLiveCountBtn" class="secondary-button full" style="margin-top:10px;">ACTUALISER</button>
           </div>
+          <div class="admin-block">
+            <h3>SESSION</h3>
+            <button id="logoutAdminBtn" class="secondary-button full">DÉCONNEXION</button>
+          </div>
         </div>
       `;
 
@@ -815,17 +866,23 @@
       content.querySelector('#refreshLiveCountBtn').onclick = () => refreshLiveMatchCount(content);
       refreshLiveMatchCount(content);
 
+      content.querySelector('#logoutAdminBtn').onclick = () => {
+        adminLogout();
+      };
+
     } else if (adminActiveTab === 'annonce') {
+      notifDestinationChoice = 'notification';
       content.innerHTML = `
         <div class="admin-section-content">
           <div class="admin-block">
             <h3>ENVOYER UN MESSAGE</h3>
-            <select id="notifDestination">
-              <option value="notification">NOTIFICATION</option>
-              <option value="upcoming">À VENIR</option>
-            </select>
             <input type="text" id="notifTitle" placeholder="Titre">
             <textarea id="notifBody" placeholder="Message"></textarea>
+            <span class="dest-label">DESTINATION DANS LA BOÎTE AUX LETTRES</span>
+            <div class="destination-toggle">
+              <button type="button" class="dest-btn active" data-dest="notification">NOTIFI-<br>CATION</button>
+              <button type="button" class="dest-btn" data-dest="upcoming">À VENIR</button>
+            </div>
             <button id="sendNotifBtn" class="main-button full">ENVOYER</button>
           </div>
           <div class="admin-block">
@@ -835,8 +892,17 @@
         </div>
       `;
 
+      const destButtons = content.querySelectorAll('.dest-btn');
+      destButtons.forEach(btn => {
+        btn.onclick = () => {
+          notifDestinationChoice = btn.dataset.dest;
+          destButtons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        };
+      });
+
       content.querySelector('#sendNotifBtn').onclick = () => {
-        const destination = content.querySelector('#notifDestination').value;
+        const destination = notifDestinationChoice;
         const title = content.querySelector('#notifTitle').value.trim();
         const body = content.querySelector('#notifBody').value.trim();
         if (!title || !body) return;
