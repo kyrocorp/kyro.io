@@ -128,7 +128,6 @@
 
   let world = null;
 
-  // Joystick mobile
   let joyTouchId = null;
 
   const mobileLayout = {
@@ -224,13 +223,13 @@
 
       .profile-banner {
         position: absolute;
-        top: 18px;
+        top: 4px;
         left: 50%;
         transform: translateX(-50%);
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 8px 18px 8px 8px;
+        padding: 7px 16px 7px 7px;
         background: rgba(8, 22, 38, 0.85);
         border: 1px solid rgba(90, 200, 255, 0.3);
         border-radius: 30px;
@@ -242,19 +241,19 @@
         box-shadow: 0 0 18px rgba(0,150,255,0.2);
       }
       .profile-banner .avatar {
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         border-radius: 50%;
         background: linear-gradient(135deg, #43d9ff, #009dff);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 900;
         color: #04101c;
       }
       .profile-banner .profile-name {
-        font-size: 12px;
+        font-size: 11px;
         letter-spacing: 1px;
         color: #dce8f2;
       }
@@ -1519,6 +1518,7 @@
       mobileLayout.boost = { x: 0.87, y: 0.78 };
       saveMobileLayout();
       renderLayoutPreview();
+      positionMobileControls();
     };
 
     setupLayoutTokenDrag($('tokenJoystick'), 'joystick');
@@ -1550,6 +1550,8 @@
       mobileLayout[key].y = py;
       tokenEl.style.left = (px * 100) + '%';
       tokenEl.style.top = (py * 100) + '%';
+      // mise à jour en direct de la position réelle en jeu (si un match tourne derrière)
+      positionMobileControls();
     }
 
     tokenEl.addEventListener('touchstart', (e) => {
@@ -1563,7 +1565,7 @@
       e.preventDefault();
     }, { passive: false });
     tokenEl.addEventListener('touchend', () => {
-      if (dragging) { dragging = false; saveMobileLayout(); }
+      if (dragging) { dragging = false; saveMobileLayout(); positionMobileControls(); }
     });
 
     tokenEl.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); });
@@ -1572,7 +1574,7 @@
       moveTo(e.clientX, e.clientY);
     });
     window.addEventListener('mouseup', () => {
-      if (dragging) { dragging = false; saveMobileLayout(); }
+      if (dragging) { dragging = false; saveMobileLayout(); positionMobileControls(); }
     });
   }
 
@@ -1689,8 +1691,14 @@
   }
 
   /* =====================================================
-     SETTINGS TRICHE (uniquement Free Play)
+     SETTINGS TRICHE (Jeu Libre + 1v1 Hors Ligne)
   ===================================================== */
+
+  function applyCheatTimeLive() {
+    if (!running || mode === 'online') return;
+    matchTimeLeft = cheatUnlimitedTime ? Infinity : cheatMatchMinutes * 60;
+    updateTimerDisplay();
+  }
 
   function buildCheatSettingsMenu() {
     const div = document.createElement('div');
@@ -1730,12 +1738,14 @@
     slider.addEventListener('input', (e) => {
       cheatMatchMinutes = parseInt(e.target.value, 10);
       valueLabel.textContent = cheatMatchMinutes;
+      applyCheatTimeLive();
     });
 
     $('cheatUnlimitedTimeCheckbox').addEventListener('change', (e) => {
       cheatUnlimitedTime = e.target.checked;
       slider.disabled = cheatUnlimitedTime;
       slider.style.opacity = cheatUnlimitedTime ? 0.4 : 1;
+      applyCheatTimeLive();
     });
 
     $('cheatSettingsBackButton').onclick = () => {
@@ -1918,10 +1928,11 @@
       }
     };
 
-    if (mode === 'freeplay') {
-      matchTimeLeft = cheatUnlimitedTime ? Infinity : cheatMatchMinutes * 60;
-    } else {
+    if (mode === 'online') {
       matchTimeLeft = MATCH_DURATION;
+    } else {
+      // Jeu Libre et 1v1 Hors Ligne partagent les settings triche (durée)
+      matchTimeLeft = cheatUnlimitedTime ? Infinity : cheatMatchMinutes * 60;
     }
 
     careerTrackPrev = { goals: 0, saves: 0, touches: 0 };
@@ -2125,7 +2136,7 @@
       return;
     }
 
-    const infiniteBoost = mode === 'freeplay' && cheatInfiniteBoost;
+    const infiniteBoost = mode !== 'online' && cheatInfiniteBoost;
     if (infiniteBoost) car.boost = 100;
 
     const boosting = input.boost && car.boost > 0;
@@ -2133,7 +2144,6 @@
 
     let steer, throttle;
     if (input.followAngle !== undefined) {
-      // Mode joystick "suivi" : la voiture tourne vers l'angle pointé et avance vers celui-ci
       const diff = angleDiff(input.followAngle, car.angle);
       steer = clamp(diff / 0.4, -1, 1);
       throttle = input.magnitude;
@@ -2774,14 +2784,11 @@
       show(concedeBtn);
       hide(mainMenuBtn);
       hide(cheatBtn);
-    } else if (mode === 'freeplay') {
+    } else {
+      // Jeu Libre et 1v1 Hors Ligne : SETTINGS TRICHE remplace CONCÉDER
       hide(concedeBtn);
       show(mainMenuBtn);
       show(cheatBtn);
-    } else {
-      show(concedeBtn);
-      show(mainMenuBtn);
-      hide(cheatBtn);
     }
   }
 
