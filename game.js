@@ -211,6 +211,31 @@
   }
 
   /* =====================================================
+     VISIBILITE UI ADMIN / BOITE AUX LETTRES
+  ===================================================== */
+
+  function hideAdminFloatingUI() {
+    const adminBtn = $('adminToggleBtn');
+    const panelBtn = $('adminPanelBtn');
+    const mailboxBtn = $('mailboxBtn');
+    if (adminBtn) hide(adminBtn);
+    if (panelBtn) hide(panelBtn);
+    if (mailboxBtn) hide(mailboxBtn);
+  }
+
+  function showAdminFloatingUI() {
+    const adminBtn = $('adminToggleBtn');
+    const panelBtn = $('adminPanelBtn');
+    const mailboxBtn = $('mailboxBtn');
+    if (mailboxBtn) show(mailboxBtn);
+    if (isAdmin) {
+      if (panelBtn) show(panelBtn);
+    } else {
+      if (adminBtn) show(adminBtn);
+    }
+  }
+
+  /* =====================================================
      STYLES DYNAMIQUES
   ===================================================== */
 
@@ -1441,6 +1466,7 @@
     `;
 
     show(mainMenu);
+    showAdminFloatingUI();
 
     $('profileBanner').onclick = openProfileModal;
 
@@ -1550,7 +1576,6 @@
       mobileLayout[key].y = py;
       tokenEl.style.left = (px * 100) + '%';
       tokenEl.style.top = (py * 100) + '%';
-      // mise à jour en direct de la position réelle en jeu (si un match tourne derrière)
       positionMobileControls();
     }
 
@@ -1789,6 +1814,7 @@
       ws = null;
     }
     hide($('searchingOverlay'));
+    showAdminFloatingUI();
     show($('mainMenu'));
   }
 
@@ -1799,6 +1825,7 @@
   function startMatch(chosenMode) {
     mode = chosenMode;
     hide($('mainMenu'));
+    hideAdminFloatingUI();
 
     if (mode === 'offline' || mode === 'freeplay') {
       isHost = true;
@@ -1931,7 +1958,6 @@
     if (mode === 'online') {
       matchTimeLeft = MATCH_DURATION;
     } else {
-      // Jeu Libre et 1v1 Hors Ligne partagent les settings triche (durée)
       matchTimeLeft = cheatUnlimitedTime ? Infinity : cheatMatchMinutes * 60;
     }
 
@@ -2785,7 +2811,6 @@
       hide(mainMenuBtn);
       hide(cheatBtn);
     } else {
-      // Jeu Libre et 1v1 Hors Ligne : SETTINGS TRICHE remplace CONCÉDER
       hide(concedeBtn);
       show(mainMenuBtn);
       show(cheatBtn);
@@ -2858,6 +2883,7 @@
     hide($('resultScreen'));
     const mc = $('mobileControls');
     if (mc) mc.remove();
+    showAdminFloatingUI();
     show($('mainMenu'));
   }
 
