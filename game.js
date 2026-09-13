@@ -82,6 +82,13 @@
   const POINTS_GOAL = 150;
   const POINTS_SAVE = 50;
 
+  function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
@@ -102,7 +109,7 @@
   };
 
   const keysDown = {};
-  const touchInput = { throttle: 0, steer: 0, boost: false };
+  const touchInput = { dx: 0, dy: 0, boost: false };
 
   let rebindingAction = null;
   let settingsOpenedFrom = 'mainMenu';
@@ -123,7 +130,6 @@
 
   // Joystick mobile
   let joyTouchId = null;
-  let boostTouchId = null;
 
   const mobileLayout = {
     joystick: { x: 0.16, y: 0.78 },
@@ -138,6 +144,11 @@
   let mailboxActiveTab = 'notification';
   let adminActiveTab = 'boutique';
   let notifDestinationChoice = 'notification';
+
+  // Profil / carrière
+  let profileName = 'Joueur';
+  let careerStats = { games: 0, goals: 0, saves: 0, touches: 0 };
+  let careerTrackPrev = { goals: 0, saves: 0, touches: 0 };
 
   /* =====================================================
      UTILITAIRES
@@ -170,6 +181,24 @@
     try { localStorage.setItem('turboball_mobile_layout', JSON.stringify(mobileLayout)); } catch (e) {}
   }
 
+  function loadProfileData() {
+    try {
+      profileName = localStorage.getItem('turboball_profile_name') || 'Joueur';
+    } catch (e) { profileName = 'Joueur'; }
+    try {
+      const saved = JSON.parse(localStorage.getItem('turboball_career_stats'));
+      if (saved) careerStats = Object.assign({ games: 0, goals: 0, saves: 0, touches: 0 }, saved);
+    } catch (e) {}
+  }
+
+  function saveProfileName() {
+    try { localStorage.setItem('turboball_profile_name', profileName); } catch (e) {}
+  }
+
+  function saveCareerStats() {
+    try { localStorage.setItem('turboball_career_stats', JSON.stringify(careerStats)); } catch (e) {}
+  }
+
   function show(el) { el.classList.remove('hidden'); }
   function hide(el) { el.classList.add('hidden'); }
 
@@ -190,6 +219,45 @@
     const style = document.createElement('style');
     style.textContent = `
       #deviceMenu .menu-buttons { margin-top: 30px; }
+
+      #mainMenu { position: fixed; }
+
+      .profile-banner {
+        position: absolute;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 18px 8px 8px;
+        background: rgba(8, 22, 38, 0.85);
+        border: 1px solid rgba(90, 200, 255, 0.3);
+        border-radius: 30px;
+        cursor: pointer;
+        z-index: 10;
+      }
+      .profile-banner:hover {
+        border-color: rgba(90, 200, 255, 0.6);
+        box-shadow: 0 0 18px rgba(0,150,255,0.2);
+      }
+      .profile-banner .avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #43d9ff, #009dff);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 900;
+        color: #04101c;
+      }
+      .profile-banner .profile-name {
+        font-size: 12px;
+        letter-spacing: 1px;
+        color: #dce8f2;
+      }
 
       #mainMenuColumns {
         display: flex;
@@ -305,7 +373,6 @@
       #statsBar .statsColumn.orange b { color: #ff9d2e; }
       #statsBar .statsColumn.orange { justify-content: flex-end; margin-left: auto; }
 
-      /* ===== JOYSTICK MOBILE ===== */
       #mobileControls {
         position: absolute;
         inset: 0;
@@ -353,7 +420,6 @@
         box-shadow: 0 0 25px #00bfff;
       }
 
-      /* ===== EDITEUR DE POSITION MOBILE (settings) ===== */
       #mobileLayoutEditor { margin-top: 15px; }
       #mobileLayoutEditor .layout-hint {
         font-size: 10px;
@@ -439,8 +505,6 @@
         font-weight: bold;
       }
 
-      /* ===== ADMIN BOUTONS FLOTTANTS ===== */
-
       #adminToggleBtn, #mailboxBtn {
         position: fixed;
         top: 14px;
@@ -493,7 +557,7 @@
         padding: 0 3px;
       }
 
-      #adminCodeModal, #adminPanelModal, #mailboxModal {
+      #adminCodeModal, #adminPanelModal, #mailboxModal, #profileModal {
         position: fixed;
         inset: 0;
         z-index: 2100;
@@ -504,7 +568,7 @@
         backdrop-filter: blur(6px);
       }
 
-      #adminCodeModal .panel, #adminPanelModal .panel, #mailboxModal .panel {
+      #adminCodeModal .panel, #adminPanelModal .panel, #mailboxModal .panel, #profileModal .panel {
         width: min(560px, 92vw);
         max-height: 85vh;
         overflow-y: auto;
@@ -752,6 +816,104 @@
       </div>
     `;
     topBar.insertAdjacentElement('afterend', div);
+  }
+
+  /* =====================================================
+     PROFIL / CARRIÈRE
+  ===================================================== */
+
+  function initialsFromName(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return '?';
+    return trimmed.charAt(0).toUpperCase();
+  }
+
+  function renderProfileBanner() {
+    const nameEl = document.querySelector('.profile-banner .profile-name');
+    const avatarEl = document.querySelector('.profile-banner .avatar');
+    if (nameEl) nameEl.textContent = profileName;
+    if (avatarEl) avatarEl.textContent = initialsFromName(profileName);
+  }
+
+  function openProfileModal() {
+    const div = document.createElement('div');
+    div.id = 'profileModal';
+    div.innerHTML = `
+      <div class="panel">
+        <h2>PROFIL</h2>
+        <div class="admin-section-content" style="margin-top:15px;">
+          <input type="text" id="profileNameInput" value="${profileName}" placeholder="Nom du profil" maxlength="20">
+          <button id="saveProfileNameBtn" class="secondary-button full">ENREGISTRER LE NOM</button>
+        </div>
+        <div class="admin-tabs">
+          <button data-tab="stats" class="secondary-button active">STATISTIQUE</button>
+        </div>
+        <div id="profileTabContent"></div>
+        <button id="profileCloseBtn" class="secondary-button full" style="margin-top:20px;">FERMER</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    div.querySelector('#saveProfileNameBtn').onclick = () => {
+      const val = div.querySelector('#profileNameInput').value.trim();
+      if (!val) return;
+      profileName = val;
+      saveProfileName();
+      renderProfileBanner();
+    };
+
+    renderProfileStats(div.querySelector('#profileTabContent'));
+
+    div.querySelector('#profileCloseBtn').onclick = () => div.remove();
+  }
+
+  function renderProfileStats(container) {
+    if (!container) return;
+    container.innerHTML = `
+      <div class="admin-section-content">
+        <div class="admin-block">
+          <div class="live-count-box">
+            <div class="count">${careerStats.games}</div>
+            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">PARTIES JOUÉES</div>
+          </div>
+        </div>
+        <div class="admin-block">
+          <div class="live-count-box">
+            <div class="count">${careerStats.goals}</div>
+            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">BUTS MARQUÉS</div>
+          </div>
+        </div>
+        <div class="admin-block">
+          <div class="live-count-box">
+            <div class="count">${careerStats.saves}</div>
+            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">SAVES</div>
+          </div>
+        </div>
+        <div class="admin-block">
+          <div class="live-count-box">
+            <div class="count">${careerStats.touches}</div>
+            <div style="font-size:9px; color:#7d8ca0; letter-spacing:1px; margin-top:5px;">TOUCHES DE BALLE</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function updateCareerLive() {
+    if (!world || myPlayerNumber === null) return;
+    const myTeam = teamOfPlayer(myPlayerNumber);
+    const cur = world.stats[myTeam];
+    const dGoals = cur.goals - careerTrackPrev.goals;
+    const dSaves = cur.saves - careerTrackPrev.saves;
+    const dTouches = cur.touches - careerTrackPrev.touches;
+
+    if (dGoals > 0 || dSaves > 0 || dTouches > 0) {
+      careerStats.goals += Math.max(0, dGoals);
+      careerStats.saves += Math.max(0, dSaves);
+      careerStats.touches += Math.max(0, dTouches);
+      careerTrackPrev = { goals: cur.goals, saves: cur.saves, touches: cur.touches };
+      saveCareerStats();
+    }
   }
 
   /* =====================================================
@@ -1253,6 +1415,11 @@
     const content = mainMenu.querySelector('.menu-content');
 
     content.innerHTML = `
+      <div class="profile-banner" id="profileBanner">
+        <div class="avatar">${initialsFromName(profileName)}</div>
+        <span class="profile-name">${profileName}</span>
+      </div>
+
       <div class="logo">
         <div class="logo-small">WELCOME TO</div>
         <h1>TURBO<span>BALL</span></h1>
@@ -1275,6 +1442,8 @@
     `;
 
     show(mainMenu);
+
+    $('profileBanner').onclick = openProfileModal;
 
     $('openSettingsBtn').onclick = () => openSettings('mainMenu');
     $('openShopBtn').onclick = openShop;
@@ -1338,7 +1507,6 @@
       <button id="resetLayoutButton" class="secondary-button" style="width:100%;">RÉINITIALISER</button>
     `;
 
-    // insert just before the reset controls button so it sits with the settings content
     const resetBtn = $('resetControlsButton');
     if (resetBtn) {
       resetBtn.insertAdjacentElement('afterend', div);
@@ -1360,7 +1528,6 @@
   function renderLayoutPreview() {
     const preview = $('layoutPreview');
     if (!preview) return;
-    const rect = preview.getBoundingClientRect();
     const joyToken = $('tokenJoystick');
     const boostToken = $('tokenBoost');
     joyToken.style.left = (mobileLayout.joystick.x * 100) + '%';
@@ -1757,6 +1924,10 @@
       matchTimeLeft = MATCH_DURATION;
     }
 
+    careerTrackPrev = { goals: 0, saves: 0, touches: 0 };
+    careerStats.games++;
+    saveCareerStats();
+
     updateTimerDisplay();
     updateScoreDisplay();
     updateStatsDisplay();
@@ -1783,9 +1954,15 @@
 
   function readLocalInput() {
     if (deviceType === 'mobile') {
+      const dx = touchInput.dx;
+      const dy = touchInput.dy;
+      const magnitude = clamp(Math.hypot(dx, dy), 0, 1);
+      if (magnitude < 0.12) {
+        return { throttle: 0, steer: 0, boost: touchInput.boost };
+      }
       return {
-        throttle: touchInput.throttle,
-        steer: touchInput.steer,
+        followAngle: Math.atan2(dy, dx),
+        magnitude,
         boost: touchInput.boost
       };
     }
@@ -1806,7 +1983,7 @@
   }
 
   /* =====================================================
-     CONTROLES MOBILES : joystick visible
+     CONTROLES MOBILES : joystick visible (mode "suivi")
   ===================================================== */
 
   function buildMobileControls() {
@@ -1842,15 +2019,14 @@
       const ky = Math.sin(angle) * clampedDist;
       knob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
 
-      // Joystick classique : haut = avance, bas = recule, gauche/droite = virage
-      touchInput.throttle = clamp(-ky / JOY_RADIUS, -1, 1);
-      touchInput.steer = clamp(kx / JOY_RADIUS, -1, 1);
+      touchInput.dx = kx / JOY_RADIUS;
+      touchInput.dy = ky / JOY_RADIUS;
     }
 
     function resetKnob() {
       knob.style.transform = 'translate(-50%, -50%)';
-      touchInput.throttle = 0;
-      touchInput.steer = 0;
+      touchInput.dx = 0;
+      touchInput.dy = 0;
     }
 
     let joyOriginX = 0, joyOriginY = 0;
@@ -1955,8 +2131,16 @@
     const boosting = input.boost && car.boost > 0;
     const maxSpeed = boosting ? CAR_CFG.maxSpeedBoost : CAR_CFG.maxSpeed;
 
-    const steer = clamp(input.steer, -1, 1);
-    const throttle = clamp(input.throttle, -1, 1);
+    let steer, throttle;
+    if (input.followAngle !== undefined) {
+      // Mode joystick "suivi" : la voiture tourne vers l'angle pointé et avance vers celui-ci
+      const diff = angleDiff(input.followAngle, car.angle);
+      steer = clamp(diff / 0.4, -1, 1);
+      throttle = input.magnitude;
+    } else {
+      steer = clamp(input.steer, -1, 1);
+      throttle = clamp(input.throttle, -1, 1);
+    }
 
     car.angle += steer * CAR_CFG.turnSpeed * dt * 60;
 
@@ -2186,6 +2370,7 @@
     }
     updateStatsDisplay();
     updatePointsDisplay();
+    updateCareerLive();
   }
 
   function carBallCollision(car, ball) {
@@ -2244,6 +2429,7 @@
     updateScoreDisplay();
     updateStatsDisplay();
     updatePointsDisplay();
+    updateCareerLive();
 
     world.frozen = true;
     resetCarsAndBallForGoal();
@@ -2384,6 +2570,7 @@
     updateTimerDisplay();
     updateStatsDisplay();
     updatePointsDisplay();
+    updateCareerLive();
   }
 
   function stopGameLoop() {
@@ -2688,6 +2875,7 @@
     loadControls();
     loadMobileLayout();
     loadAdminData();
+    loadProfileData();
     injectDynamicStyles();
     injectBallSpeedDisplay();
     injectStatsBar();
