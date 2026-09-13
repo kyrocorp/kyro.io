@@ -82,8 +82,6 @@
   const POINTS_GOAL = 150;
   const POINTS_SAVE = 50;
 
-  const MOVE_MAX_DRAG = 100;
-
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
@@ -110,6 +108,8 @@
   let settingsOpenedFrom = 'mainMenu';
 
   let cheatInfiniteBoost = false;
+  let cheatMatchMinutes = 2;
+  let cheatUnlimitedTime = false;
 
   let canvas, ctx;
   let running = false;
@@ -121,9 +121,14 @@
 
   let world = null;
 
-  let moveTouchId = null;
-  let moveStartX = 0;
-  let moveStartY = 0;
+  // Joystick mobile
+  let joyTouchId = null;
+  let boostTouchId = null;
+
+  const mobileLayout = {
+    joystick: { x: 0.16, y: 0.78 },
+    boost: { x: 0.87, y: 0.78 }
+  };
 
   // Admin
   let isAdmin = false;
@@ -149,6 +154,20 @@
 
   function saveControls() {
     try { localStorage.setItem('turboball_controls', JSON.stringify(controls)); } catch (e) {}
+  }
+
+  function loadMobileLayout() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('turboball_mobile_layout'));
+      if (saved) {
+        if (saved.joystick) Object.assign(mobileLayout.joystick, saved.joystick);
+        if (saved.boost) Object.assign(mobileLayout.boost, saved.boost);
+      }
+    } catch (e) {}
+  }
+
+  function saveMobileLayout() {
+    try { localStorage.setItem('turboball_mobile_layout', JSON.stringify(mobileLayout)); } catch (e) {}
   }
 
   function show(el) { el.classList.remove('hidden'); }
@@ -286,21 +305,38 @@
       #statsBar .statsColumn.orange b { color: #ff9d2e; }
       #statsBar .statsColumn.orange { justify-content: flex-end; margin-left: auto; }
 
+      /* ===== JOYSTICK MOBILE ===== */
       #mobileControls {
         position: absolute;
         inset: 0;
         z-index: 40;
       }
-      #mcMoveArea {
+      .joystick-base {
         position: absolute;
-        inset: 0;
-        touch-action: none;
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.06);
+        border: 2px solid rgba(120, 200, 255, 0.35);
+        transform: translate(-50%, -50%);
         pointer-events: auto;
+        touch-action: none;
+      }
+      .joystick-knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        background: rgba(0, 191, 255, 0.35);
+        border: 2px solid #43d9ff;
+        box-shadow: 0 0 18px rgba(0,191,255,0.4);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
       }
       #mcBoost {
         position: absolute;
-        bottom: 55px;
-        right: 30px;
         width: 84px;
         height: 84px;
         border-radius: 50%;
@@ -309,10 +345,59 @@
         pointer-events: auto;
         z-index: 41;
         background: rgba(0,150,255,0.12);
+        transform: translate(-50%, -50%);
+        touch-action: none;
       }
       #mcBoost.active {
         background: #00bfff;
         box-shadow: 0 0 25px #00bfff;
+      }
+
+      /* ===== EDITEUR DE POSITION MOBILE (settings) ===== */
+      #mobileLayoutEditor { margin-top: 15px; }
+      #mobileLayoutEditor .layout-hint {
+        font-size: 10px;
+        color: #91a2b4;
+        letter-spacing: 1px;
+        margin-bottom: 14px;
+        text-align: center;
+      }
+      #layoutPreview {
+        position: relative;
+        width: 100%;
+        max-width: 320px;
+        aspect-ratio: 1200 / 700;
+        margin: 0 auto 16px;
+        background: #071421;
+        border: 1px solid rgba(110, 190, 255, 0.25);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .layout-token {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 8px;
+        letter-spacing: 0.5px;
+        color: white;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+      }
+      .layout-token.joystick-token {
+        width: 20%;
+        aspect-ratio: 1;
+        background: rgba(0,191,255,0.25);
+        border: 2px solid #43d9ff;
+      }
+      .layout-token.boost-token {
+        width: 15%;
+        aspect-ratio: 1;
+        background: rgba(255, 157, 46, 0.25);
+        border: 2px solid #ff9d2e;
       }
 
       #cheatSettingsMenu .cheat-row {
@@ -333,6 +418,25 @@
         height: 22px;
         accent-color: #00bfff;
         cursor: pointer;
+      }
+      #cheatSettingsMenu .cheat-row.column {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      #cheatSettingsMenu input[type="range"] {
+        width: 100%;
+        accent-color: #00bfff;
+      }
+      #cheatSettingsMenu .range-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: #7d8ca0;
+      }
+      #cheatSettingsMenu .range-labels #cheatTimeValue {
+        color: #43d9ff;
+        font-weight: bold;
       }
 
       /* ===== ADMIN BOUTONS FLOTTANTS ===== */
@@ -528,7 +632,6 @@
         white-space: nowrap;
       }
 
-      /* Sélecteur destination : petits carrés */
       .dest-label {
         font-size: 10px;
         letter-spacing: 1px;
@@ -762,7 +865,7 @@
   }
 
   /* =====================================================
-     ADMIN PANEL (3 catégories : Boutique / Général / Annonce)
+     ADMIN PANEL
   ===================================================== */
 
   function openAdminPanel() {
@@ -1036,7 +1139,7 @@
   }
 
   /* =====================================================
-     BOÎTE AUX LETTRES (2 onglets : Notifications / À venir)
+     BOÎTE AUX LETTRES
   ===================================================== */
 
   function updateMailboxBadge() {
@@ -1181,7 +1284,7 @@
   }
 
   /* =====================================================
-     SETTINGS
+     SETTINGS (clavier PC / disposition mobile)
   ===================================================== */
 
   function refreshSettingsLabels() {
@@ -1192,6 +1295,21 @@
     $('boostKeyButton').textContent = controls.boost === ' ' ? 'SPACE' : controls.boost.toUpperCase();
   }
 
+  function refreshSettingsVisibility() {
+    const keyboardSection = document.querySelector('#settingsMenu .settings-section');
+    const editor = $('mobileLayoutEditor');
+    if (deviceType === 'mobile') {
+      if (keyboardSection) hide(keyboardSection);
+      if (editor) {
+        show(editor);
+        renderLayoutPreview();
+      }
+    } else {
+      if (keyboardSection) show(keyboardSection);
+      if (editor) hide(editor);
+    }
+  }
+
   function openSettings(fromMenu) {
     settingsOpenedFrom = fromMenu;
     if (fromMenu === 'mainMenu') {
@@ -1200,7 +1318,95 @@
       hide($('pauseMenu'));
     }
     refreshSettingsLabels();
+    refreshSettingsVisibility();
     show($('settingsMenu'));
+  }
+
+  function buildMobileLayoutEditor() {
+    const settingsPanel = document.querySelector('#settingsMenu .panel');
+    if (!settingsPanel || $('mobileLayoutEditor')) return;
+
+    const div = document.createElement('div');
+    div.id = 'mobileLayoutEditor';
+    div.className = 'hidden';
+    div.innerHTML = `
+      <div class="layout-hint">GLISSE LE JOYSTICK ET LE BOOST OÙ TU VEUX</div>
+      <div id="layoutPreview">
+        <div class="layout-token joystick-token" id="tokenJoystick">JOY</div>
+        <div class="layout-token boost-token" id="tokenBoost">BOOST</div>
+      </div>
+      <button id="resetLayoutButton" class="secondary-button" style="width:100%;">RÉINITIALISER</button>
+    `;
+
+    // insert just before the reset controls button so it sits with the settings content
+    const resetBtn = $('resetControlsButton');
+    if (resetBtn) {
+      resetBtn.insertAdjacentElement('afterend', div);
+    } else {
+      settingsPanel.appendChild(div);
+    }
+
+    $('resetLayoutButton').onclick = () => {
+      mobileLayout.joystick = { x: 0.16, y: 0.78 };
+      mobileLayout.boost = { x: 0.87, y: 0.78 };
+      saveMobileLayout();
+      renderLayoutPreview();
+    };
+
+    setupLayoutTokenDrag($('tokenJoystick'), 'joystick');
+    setupLayoutTokenDrag($('tokenBoost'), 'boost');
+  }
+
+  function renderLayoutPreview() {
+    const preview = $('layoutPreview');
+    if (!preview) return;
+    const rect = preview.getBoundingClientRect();
+    const joyToken = $('tokenJoystick');
+    const boostToken = $('tokenBoost');
+    joyToken.style.left = (mobileLayout.joystick.x * 100) + '%';
+    joyToken.style.top = (mobileLayout.joystick.y * 100) + '%';
+    boostToken.style.left = (mobileLayout.boost.x * 100) + '%';
+    boostToken.style.top = (mobileLayout.boost.y * 100) + '%';
+  }
+
+  function setupLayoutTokenDrag(tokenEl, key) {
+    let dragging = false;
+
+    function moveTo(clientX, clientY) {
+      const preview = $('layoutPreview');
+      const rect = preview.getBoundingClientRect();
+      let px = (clientX - rect.left) / rect.width;
+      let py = (clientY - rect.top) / rect.height;
+      px = clamp(px, 0.04, 0.96);
+      py = clamp(py, 0.06, 0.94);
+      mobileLayout[key].x = px;
+      mobileLayout[key].y = py;
+      tokenEl.style.left = (px * 100) + '%';
+      tokenEl.style.top = (py * 100) + '%';
+    }
+
+    tokenEl.addEventListener('touchstart', (e) => {
+      dragging = true;
+      e.preventDefault();
+    }, { passive: false });
+    tokenEl.addEventListener('touchmove', (e) => {
+      if (!dragging) return;
+      const t = e.touches[0];
+      moveTo(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
+    tokenEl.addEventListener('touchend', () => {
+      if (dragging) { dragging = false; saveMobileLayout(); }
+    });
+
+    tokenEl.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      moveTo(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => {
+      if (dragging) { dragging = false; saveMobileLayout(); }
+    });
   }
 
   function initSettingsMenu() {
@@ -1241,6 +1447,8 @@
       saveControls();
       refreshSettingsLabels();
     };
+
+    buildMobileLayoutEditor();
 
     $('settingsBackButton').onclick = () => {
       hide($('settingsMenu'));
@@ -1328,6 +1536,19 @@
           <span>BOOST ILLIMITÉ</span>
           <input type="checkbox" id="cheatInfiniteBoostCheckbox">
         </div>
+        <div class="cheat-row column">
+          <span>DURÉE DU MATCH (MINUTES)</span>
+          <input type="range" id="cheatTimeSlider" min="1" max="100" value="2">
+          <div class="range-labels">
+            <span>1</span>
+            <span id="cheatTimeValue">2</span>
+            <span>100</span>
+          </div>
+        </div>
+        <div class="cheat-row">
+          <span>TEMPS ILLIMITÉ</span>
+          <input type="checkbox" id="cheatUnlimitedTimeCheckbox">
+        </div>
         <button id="cheatSettingsBackButton" class="secondary-button" style="margin-top:25px;">BACK</button>
       </div>
     `;
@@ -1335,6 +1556,19 @@
 
     $('cheatInfiniteBoostCheckbox').addEventListener('change', (e) => {
       cheatInfiniteBoost = e.target.checked;
+    });
+
+    const slider = $('cheatTimeSlider');
+    const valueLabel = $('cheatTimeValue');
+    slider.addEventListener('input', (e) => {
+      cheatMatchMinutes = parseInt(e.target.value, 10);
+      valueLabel.textContent = cheatMatchMinutes;
+    });
+
+    $('cheatUnlimitedTimeCheckbox').addEventListener('change', (e) => {
+      cheatUnlimitedTime = e.target.checked;
+      slider.disabled = cheatUnlimitedTime;
+      slider.style.opacity = cheatUnlimitedTime ? 0.4 : 1;
     });
 
     $('cheatSettingsBackButton').onclick = () => {
@@ -1346,6 +1580,11 @@
   function openCheatSettings() {
     hide($('pauseMenu'));
     $('cheatInfiniteBoostCheckbox').checked = cheatInfiniteBoost;
+    $('cheatTimeSlider').value = cheatMatchMinutes;
+    $('cheatTimeValue').textContent = cheatMatchMinutes;
+    $('cheatUnlimitedTimeCheckbox').checked = cheatUnlimitedTime;
+    $('cheatTimeSlider').disabled = cheatUnlimitedTime;
+    $('cheatTimeSlider').style.opacity = cheatUnlimitedTime ? 0.4 : 1;
     show($('cheatSettingsMenu'));
   }
 
@@ -1512,7 +1751,12 @@
       }
     };
 
-    matchTimeLeft = MATCH_DURATION;
+    if (mode === 'freeplay') {
+      matchTimeLeft = cheatUnlimitedTime ? Infinity : cheatMatchMinutes * 60;
+    } else {
+      matchTimeLeft = MATCH_DURATION;
+    }
+
     updateTimerDisplay();
     updateScoreDisplay();
     updateStatsDisplay();
@@ -1562,76 +1806,102 @@
   }
 
   /* =====================================================
-     CONTROLES MOBILES : pavé tactile invisible analogique
+     CONTROLES MOBILES : joystick visible
   ===================================================== */
 
   function buildMobileControls() {
-    if ($('mobileControls')) return;
+    const old = $('mobileControls');
+    if (old) old.remove();
+
     const div = document.createElement('div');
     div.id = 'mobileControls';
-    div.innerHTML = `
-      <div id="mcMoveArea"></div>
-      <button id="mcBoost">BOOST</button>
-    `;
+
+    const joyBase = document.createElement('div');
+    joyBase.className = 'joystick-base';
+    joyBase.id = 'joyBase';
+    joyBase.innerHTML = '<div class="joystick-knob" id="joyKnob"></div>';
+
+    const boostBtn = document.createElement('button');
+    boostBtn.id = 'mcBoost';
+    boostBtn.textContent = 'BOOST';
+
+    div.appendChild(joyBase);
+    div.appendChild(boostBtn);
     $('arenaContainer').appendChild(div);
 
-    const moveArea = $('mcMoveArea');
-    const boostBtn = $('mcBoost');
+    positionMobileControls();
 
-    function resetMoveInput() {
+    const knob = $('joyKnob');
+    const JOY_RADIUS = 55;
+
+    function updateKnob(dx, dy) {
+      const dist = Math.hypot(dx, dy);
+      const clampedDist = Math.min(dist, JOY_RADIUS);
+      const angle = Math.atan2(dy, dx);
+      const kx = Math.cos(angle) * clampedDist;
+      const ky = Math.sin(angle) * clampedDist;
+      knob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+
+      // Joystick classique : haut = avance, bas = recule, gauche/droite = virage
+      touchInput.throttle = clamp(-ky / JOY_RADIUS, -1, 1);
+      touchInput.steer = clamp(kx / JOY_RADIUS, -1, 1);
+    }
+
+    function resetKnob() {
+      knob.style.transform = 'translate(-50%, -50%)';
       touchInput.throttle = 0;
       touchInput.steer = 0;
     }
 
-    function updateMoveFromDelta(dx, dy) {
-      touchInput.throttle = clamp(-dx / MOVE_MAX_DRAG, -1, 1);
-      touchInput.steer = clamp(dy / MOVE_MAX_DRAG, -1, 1);
-    }
+    let joyOriginX = 0, joyOriginY = 0;
 
-    moveArea.addEventListener('touchstart', (e) => {
-      if (moveTouchId !== null) return;
+    joyBase.addEventListener('touchstart', (e) => {
+      if (joyTouchId !== null) return;
       const t = e.changedTouches[0];
-      moveTouchId = t.identifier;
-      moveStartX = t.clientX;
-      moveStartY = t.clientY;
+      const rect = joyBase.getBoundingClientRect();
+      joyOriginX = rect.left + rect.width / 2;
+      joyOriginY = rect.top + rect.height / 2;
+      joyTouchId = t.identifier;
+      updateKnob(t.clientX - joyOriginX, t.clientY - joyOriginY);
       e.preventDefault();
     }, { passive: false });
 
-    moveArea.addEventListener('touchmove', (e) => {
+    joyBase.addEventListener('touchmove', (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier === moveTouchId) {
-          updateMoveFromDelta(t.clientX - moveStartX, t.clientY - moveStartY);
+        if (t.identifier === joyTouchId) {
+          updateKnob(t.clientX - joyOriginX, t.clientY - joyOriginY);
           e.preventDefault();
         }
       }
     }, { passive: false });
 
-    function endMoveTouch(e) {
+    function endJoyTouch(e) {
       for (const t of e.changedTouches) {
-        if (t.identifier === moveTouchId) {
-          moveTouchId = null;
-          resetMoveInput();
+        if (t.identifier === joyTouchId) {
+          joyTouchId = null;
+          resetKnob();
         }
       }
     }
-
-    moveArea.addEventListener('touchend', endMoveTouch, { passive: false });
-    moveArea.addEventListener('touchcancel', endMoveTouch, { passive: false });
+    joyBase.addEventListener('touchend', endJoyTouch, { passive: false });
+    joyBase.addEventListener('touchcancel', endJoyTouch, { passive: false });
 
     let mouseDragging = false;
-    moveArea.addEventListener('mousedown', (e) => {
+    joyBase.addEventListener('mousedown', (e) => {
       mouseDragging = true;
-      moveStartX = e.clientX;
-      moveStartY = e.clientY;
+      const rect = joyBase.getBoundingClientRect();
+      joyOriginX = rect.left + rect.width / 2;
+      joyOriginY = rect.top + rect.height / 2;
+      updateKnob(e.clientX - joyOriginX, e.clientY - joyOriginY);
     });
     window.addEventListener('mousemove', (e) => {
       if (!mouseDragging) return;
-      updateMoveFromDelta(e.clientX - moveStartX, e.clientY - moveStartY);
+      updateKnob(e.clientX - joyOriginX, e.clientY - joyOriginY);
     });
     window.addEventListener('mouseup', () => {
       if (!mouseDragging) return;
       mouseDragging = false;
-      resetMoveInput();
+      resetKnob();
     });
 
     const setBoost = (v) => {
@@ -1642,6 +1912,22 @@
     boostBtn.addEventListener('touchend', (e) => { e.preventDefault(); setBoost(false); }, { passive: false });
     boostBtn.addEventListener('mousedown', () => setBoost(true));
     boostBtn.addEventListener('mouseup', () => setBoost(false));
+  }
+
+  function positionMobileControls() {
+    const container = $('arenaContainer');
+    const joyBase = $('joyBase');
+    const boostBtn = $('mcBoost');
+    if (!container || !joyBase || !boostBtn) return;
+
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+
+    joyBase.style.left = (mobileLayout.joystick.x * w) + 'px';
+    joyBase.style.top = (mobileLayout.joystick.y * h) + 'px';
+
+    boostBtn.style.left = (mobileLayout.boost.x * w) + 'px';
+    boostBtn.style.top = (mobileLayout.boost.y * h) + 'px';
   }
 
   /* =====================================================
@@ -2009,6 +2295,10 @@
 
     timerInterval = setInterval(() => {
       if (paused) return;
+      if (matchTimeLeft === Infinity) {
+        updateTimerDisplay();
+        return;
+      }
       matchTimeLeft--;
       updateTimerDisplay();
       if (matchTimeLeft <= 0) endMatch();
@@ -2270,6 +2560,10 @@
   }
 
   function updateTimerDisplay() {
+    if (matchTimeLeft === Infinity) {
+      $('timer').textContent = '∞';
+      return;
+    }
     const m = Math.floor(matchTimeLeft / 60);
     const s = matchTimeLeft % 60;
     $('timer').textContent = m + ':' + String(s).padStart(2, '0');
@@ -2392,6 +2686,7 @@
 
   function init() {
     loadControls();
+    loadMobileLayout();
     loadAdminData();
     injectDynamicStyles();
     injectBallSpeedDisplay();
