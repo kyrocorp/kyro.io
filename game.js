@@ -89,11 +89,13 @@
     return d;
   }
 
+  const GAMEPAD_DEADZONE = 0.18;
+
   /* =====================================================
      ETAT GLOBAL
   ===================================================== */
 
-  let deviceType = null;
+  let deviceType = null; // 'pc' | 'mobile' | 'gamepad'
   let mode = null;
   let ws = null;
   let myPlayerNumber = null;
@@ -134,6 +136,8 @@
     joystick: { x: 0.16, y: 0.78 },
     boost: { x: 0.87, y: 0.78 }
   };
+
+  let gamepadLastStartPressed = false;
 
   // Admin
   let isAdmin = false;
@@ -843,6 +847,39 @@
   }
 
   /* =====================================================
+     LEGENDE DE CONTROLES (bas de l'écran, dans le match)
+  ===================================================== */
+
+  const PC_CONTROLS_HTML = `
+    <span>PILOT CONTROLS</span>
+    <b>Z</b> Forward
+    <b>S</b> Reverse
+    <b>Q</b> Left
+    <b>D</b> Right
+    <b>SPACE</b> Boost
+    <b>P</b> Pause
+  `;
+
+  const GAMEPAD_CONTROLS_HTML = `
+    <span>MANETTE</span>
+    <b>STICK G</b> Direction
+    <b>R2</b> Avancer
+    <b>L2</b> Reculer
+    <b>X</b> Boost
+    <b>START</b> Pause
+  `;
+
+  function updateControlsLegend() {
+    const legendEl = document.querySelector('#bottomHud #controls');
+    if (!legendEl) return;
+    if (deviceType === 'gamepad') {
+      legendEl.innerHTML = GAMEPAD_CONTROLS_HTML;
+    } else {
+      legendEl.innerHTML = PC_CONTROLS_HTML;
+    }
+  }
+
+  /* =====================================================
      PROFIL / CARRIÈRE
   ===================================================== */
 
@@ -1397,7 +1434,7 @@
   }
 
   /* =====================================================
-     ECRAN CHOIX PC / MOBILE
+     ECRAN CHOIX PC / MOBILE / MANETTE
   ===================================================== */
 
   function buildDeviceMenu() {
@@ -1414,6 +1451,7 @@
         <div class="menu-buttons">
           <button id="choosePc" class="main-button">JOUER SUR PC</button>
           <button id="chooseMobile" class="secondary-button">JOUER SUR MOBILE</button>
+          <button id="chooseGamepad" class="secondary-button">JOUER À LA MANETTE</button>
         </div>
         <div class="menu-footer">ORIGINAL 2D CAR FOOTBALL GAME</div>
       </div>
@@ -1422,6 +1460,7 @@
 
     $('choosePc').onclick = () => selectDevice('pc');
     $('chooseMobile').onclick = () => selectDevice('mobile');
+    $('chooseGamepad').onclick = () => selectDevice('gamepad');
   }
 
   function selectDevice(type) {
@@ -1478,7 +1517,7 @@
   }
 
   /* =====================================================
-     SETTINGS (clavier PC / disposition mobile)
+     SETTINGS (clavier PC / disposition mobile / manette)
   ===================================================== */
 
   function refreshSettingsLabels() {
@@ -1492,12 +1531,17 @@
   function refreshSettingsVisibility() {
     const keyboardSection = document.querySelector('#settingsMenu .settings-section');
     const editor = $('mobileLayoutEditor');
+
     if (deviceType === 'mobile') {
       if (keyboardSection) hide(keyboardSection);
       if (editor) {
         show(editor);
         renderLayoutPreview();
       }
+    } else if (deviceType === 'gamepad') {
+      // Ni les touches PC ni le positionnement mobile ne s'appliquent à la manette
+      if (keyboardSection) hide(keyboardSection);
+      if (editor) hide(editor);
     } else {
       if (keyboardSection) show(keyboardSection);
       if (editor) hide(editor);
@@ -1970,6 +2014,7 @@
     updateStatsDisplay();
     updatePointsDisplay();
     updatePauseMenuForMode();
+    updateControlsLegend();
 
     if (deviceType === 'mobile') buildMobileControls();
   }
@@ -1989,7 +2034,51 @@
     keysDown[k] = false;
   });
 
+  /* =====================================================
+     MANETTE : lecture des entrées
+  ===================================================== */
+
+  function getGamepadInput() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i]) { gp = pads[i]; break; }
+    }
+    if (!gp) return { throttle: 0, steer: 0, boost: false };
+
+    const stickX = gp.axes[0] || 0;
+    const stickY = gp.axes[1] || 0;
+    const magnitude = Math.hypot(stickX, stickY);
+
+    const rt = gp.buttons[7] ? gp.buttons[7].value : 0; // R2
+    const lt = gp.buttons[6] ? gp.buttons[6].value : 0; // L2
+    const boostPressed = gp.buttons[0] ? gp.buttons[0].pressed : false; // Croix / X
+
+    const throttle = clamp(rt - lt, -1, 1);
+
+    // Pause via START/OPTIONS (index 9), avec détection de front montant
+    const startPressed = gp.buttons[9] ? gp.buttons[9].pressed : false;
+    if (startPressed && !gamepadLastStartPressed && running) {
+      togglePause();
+    }
+    gamepadLastStartPressed = startPressed;
+
+    if (magnitude < GAMEPAD_DEADZONE) {
+      return { throttle, steer: 0, boost: boostPressed };
+    }
+
+    return {
+      followAngle: Math.atan2(stickY, stickX),
+      throttle,
+      boost: boostPressed
+    };
+  }
+
   function readLocalInput() {
+    if (deviceType === 'gamepad') {
+      return getGamepadInput();
+    }
+
     if (deviceType === 'mobile') {
       const dx = touchInput.dx;
       const dy = touchInput.dy;
@@ -2172,7 +2261,7 @@
     if (input.followAngle !== undefined) {
       const diff = angleDiff(input.followAngle, car.angle);
       steer = clamp(diff / 0.4, -1, 1);
-      throttle = input.magnitude;
+      throttle = input.throttle !== undefined ? clamp(input.throttle, -1, 1) : input.magnitude;
     } else {
       steer = clamp(input.steer, -1, 1);
       throttle = clamp(input.throttle, -1, 1);
